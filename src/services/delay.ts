@@ -14,6 +14,8 @@ import { debugLog } from '@/utils/debug'
 import { classifyDelay, DEFAULT_DELAY_TIMEOUT } from '@/utils/delay'
 import { isValidUrl } from '@/utils/network'
 
+import { checkNodeDiagnostics, type DiagnosticsState } from './node-diagnostics'
+
 export type DelaySnapshot = {
   of: (member: ResolvedProxyMember) => number
 }
@@ -24,11 +26,26 @@ export interface DelayUpdate {
   delay: number
   elapsed?: number
   updatedAt: number
+  diagnostics?: DiagnosticsState
 }
 
 const CACHE_TTL = 30 * 60 * 1000
 
 class DelayManager {
+  private diagnosticsGeneration: string | null = null
+  private measurements = new Map<string, Promise<DelayUpdate>>()
+
+  setDiagnosticsGeneration(generation: string | null) {
+    if (generation === this.diagnosticsGeneration) return
+    this.diagnosticsGeneration = generation
+    this.measurements.clear()
+    for (const [key, value] of this.cache) {
+      const update = { ...value, diagnostics: undefined }
+      this.cache.set(key, update)
+      this.pendingItemUpdates.set(key, [update])
+    }
+    this.scheduleItemFlush()
+  }
   private cache = new Map<string, DelayUpdate>()
   private urlMap = new Map<string, string>()
 
@@ -202,7 +219,7 @@ class DelayManager {
     name: string,
     group: string,
     delay: number,
-    meta?: { elapsed?: number },
+    meta?: { elapsed?: number; diagnostics?: DiagnosticsState },
   ): DelayUpdate {
     const key = hashKey(name, group)
     debugLog(
@@ -212,6 +229,7 @@ class DelayManager {
       delay,
       elapsed: meta?.elapsed,
       updatedAt: Date.now(),
+      diagnostics: meta?.diagnostics ?? this.cache.get(key)?.diagnostics,
     }
 
     this.cache.set(key, update)
@@ -283,6 +301,77 @@ class DelayManager {
   }
 
   private async measureDelay(
+    member: InteractableProxyMember,
+    group: string,
+    timeout: number,
+  ): Promise<DelayUpdate> {
+    const key = JSON.stringify([
+      this.diagnosticsGeneration,
+      group,
+      member.ref.name,
+      member.kind === 'node' ? member.node.source : 'group',
+    ])
+    const pending = this.measurements.get(key)
+    if (pending) return pending
+    const generation = this.diagnosticsGeneration
+    const run = async () => {
+      const diagnostics =
+        member.kind === 'node'
+          ? this.measureDiagnostics(member, group, timeout, generation)
+          : Promise.resolve()
+      await Promise.all([
+        this.measureLatency(member, group, timeout),
+        diagnostics,
+      ])
+      return (
+        this.getDelayUpdate(member.ref.name, group) ?? {
+          delay: -1,
+          updatedAt: 0,
+        }
+      )
+    }
+    const measurement = run().finally(() => {
+      if (this.measurements.get(key) === measurement)
+        this.measurements.delete(key)
+    })
+    this.measurements.set(key, measurement)
+    return measurement
+  }
+
+  private async measureDiagnostics(
+    member: Extract<InteractableProxyMember, { kind: 'node' }>,
+    group: string,
+    timeout: number,
+    generation: string | null,
+  ) {
+    const name = member.ref.name
+    const publish = (diagnostics: DiagnosticsState) => {
+      if (generation !== this.diagnosticsGeneration) return
+      const previous = this.getDelayUpdate(name, group)
+      this.setDelay(name, group, previous?.delay ?? -2, {
+        elapsed: previous?.elapsed,
+        diagnostics,
+      })
+    }
+    publish({ status: 'testing' })
+    try {
+      const result = await checkNodeDiagnostics(
+        member.node.source.proxyName,
+        providerNameOf(member.node),
+        timeout,
+        member.node.udp,
+      )
+      publish({ status: 'done', result })
+    } catch (error) {
+      const detail =
+        error && typeof error === 'object' && 'detail' in error
+          ? String(error.detail)
+          : String(error)
+      publish({ status: 'error', detail })
+    }
+  }
+
+  private async measureLatency(
     member: InteractableProxyMember,
     group: string,
     timeout: number,

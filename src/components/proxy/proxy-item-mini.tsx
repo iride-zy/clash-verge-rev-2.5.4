@@ -11,6 +11,8 @@ import {
   type ResolvedProxyMember,
 } from '@/types/proxy-view'
 
+import { NodeNetworkInfo } from './node-network-info'
+
 interface Props {
   group: ProxyGroupView
   member: ResolvedProxyMember
@@ -31,10 +33,8 @@ export const ProxyItemMini = (props: Props) => {
   const { t } = useTranslation()
 
   // -1/<=0 为不显示，-2 为 loading
-  const { delayValue, isPreset, timeout, onDelay } = useProxyDelayState(
-    member,
-    group.name,
-  )
+  const { delayState, delayValue, isPreset, timeout, onDelay } =
+    useProxyDelayState(member, group.name)
 
   return (
     <ListItemButton
@@ -44,7 +44,7 @@ export const ProxyItemMini = (props: Props) => {
       onClick={unresolved ? undefined : () => onClick?.(member)}
       sx={[
         {
-          height: 56,
+          height: 112,
           borderRadius: 1.5,
           pl: 1.5,
           pr: 1,
@@ -81,7 +81,10 @@ export const ProxyItemMini = (props: Props) => {
         },
       ]}
     >
-      <Box title={`${name}\n${now ?? ''}`} sx={{ overflow: 'hidden' }}>
+      <Box
+        title={`${name}\n${now ?? ''}`}
+        sx={{ overflow: 'hidden', minWidth: 0 }}
+      >
         <Typography
           variant="body2"
           component="div"
@@ -152,6 +155,9 @@ export const ProxyItemMini = (props: Props) => {
               </TypeBox>
             )}
           </Box>
+        )}
+        {member.kind === 'node' && (
+          <NodeNetworkInfo state={delayState.diagnostics} />
         )}
       </Box>
       <Box

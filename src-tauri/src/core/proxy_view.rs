@@ -17,6 +17,7 @@ pub struct ProxyViewBuilder;
 #[serde(rename_all = "camelCase")]
 pub struct ProxyViewV1 {
     pub schema_version: u8,
+    pub diagnostics_generation: Option<String>,
     pub order_source: ProxyViewOrderSource,
     pub provider_state: ProxyViewProviderState,
     pub global: Option<ProxyGroupView>,
@@ -238,6 +239,7 @@ impl ProxyViewBuilder {
 
         ProxyViewV1 {
             schema_version: 1,
+            diagnostics_generation: None,
             order_source,
             provider_state,
             global,

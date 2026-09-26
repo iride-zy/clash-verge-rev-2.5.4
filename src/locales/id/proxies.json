@@ -118,5 +118,14 @@
         "PASS": "Lewati aturan ini saat cocok"
       }
     }
+  },
+  "diagnostics": {
+    "entry": "Entry",
+    "exit": "Exit",
+    "testing": "Testing…",
+    "failed": "Detection failed",
+    "untested": "Not tested",
+    "unknown": "Unknown",
+    "unsupported": "UDP unsupported"
   }
 }

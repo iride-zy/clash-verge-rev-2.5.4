@@ -118,5 +118,14 @@
         "PASS": "Туры килсә дә, бу кагыйдәне урап узу"
       }
     }
+  },
+  "diagnostics": {
+    "entry": "Entry",
+    "exit": "Exit",
+    "testing": "Testing…",
+    "failed": "Detection failed",
+    "untested": "Not tested",
+    "unknown": "Unknown",
+    "unsupported": "UDP unsupported"
   }
 }

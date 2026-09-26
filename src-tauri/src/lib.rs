@@ -150,6 +150,7 @@ mod app_init {
             cmd::change_clash_core,
             cmd::get_runtime_config,
             cmd::get_proxy_view,
+            cmd::check_node_diagnostics,
             cmd::get_runtime_yaml,
             cmd::get_runtime_logs,
             cmd::get_runtime_proxy_chain_config,

@@ -9,6 +9,7 @@ import { useClashInfo, useRuntimeConfig } from '@/hooks/use-clash'
 import { runStateQueryKey } from '@/hooks/use-system-state'
 import { useVerge } from '@/hooks/use-verge'
 import { getProxyView, getRuntimeState, getSystemProxy } from '@/services/cmds'
+import delayManager from '@/services/delay'
 import { subscribeVergeEvents } from '@/services/events'
 import { useQuery } from '@/services/query-client'
 import { resolveDisplayedMixedPort } from '@/utils/mixed-port'
@@ -102,6 +103,12 @@ export const AppDataProvider = ({
     ...TQ_DEFAULTS,
   })
   const runningMode = runState?.mode
+
+  useEffect(() => {
+    delayManager.setDiagnosticsGeneration(
+      proxyView?.diagnosticsGeneration ?? null,
+    )
+  }, [proxyView?.diagnosticsGeneration])
 
   const refreshProxy = useStableFn(_refetchProxyView)
   const refreshClashConfig = useStableFn(_refetchClashConfig)

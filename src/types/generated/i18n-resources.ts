@@ -490,6 +490,15 @@ export interface TranslationResources {
           }
         }
       }
+      diagnostics: {
+        entry: string
+        exit: string
+        failed: string
+        testing: string
+        unknown: string
+        unsupported: string
+        untested: string
+      }
       feedback: {
         notifications: {
           provider: {

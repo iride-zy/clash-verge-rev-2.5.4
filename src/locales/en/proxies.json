@@ -118,5 +118,14 @@
         "PASS": "Skips this rule when matched (PASS)"
       }
     }
+  },
+  "diagnostics": {
+    "entry": "Entry",
+    "exit": "Exit",
+    "testing": "Testing…",
+    "failed": "Detection failed",
+    "untested": "Not tested",
+    "unknown": "Unknown",
+    "unsupported": "UDP unsupported"
   }
 }

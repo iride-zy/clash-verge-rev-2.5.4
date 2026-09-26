@@ -1,5 +1,6 @@
 export interface ProxyViewV1 {
   schemaVersion: 1
+  diagnosticsGeneration?: string | null
   orderSource: 'runtime' | 'fallback'
   providerState: 'ready' | 'unavailable'
   global: ProxyGroupView | null

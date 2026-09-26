@@ -848,6 +848,13 @@ pub async fn enhance(
     let config = ensure_lan_bind_address(config);
 
     let config = cleanup_proxy_groups(config);
+    let config = match crate::core::node_diagnostics::config::install(config.clone()) {
+        Ok(config) => config,
+        Err(error) => {
+            logging!(warn, Type::Config, "Node diagnostics unavailable: {error:#}");
+            config
+        }
+    };
     let config = use_sort(config);
 
     let mut exists_keys_set = HashSet::new();

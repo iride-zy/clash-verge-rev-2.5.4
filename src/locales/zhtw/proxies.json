@@ -118,5 +118,14 @@
         "PASS": "跳過此項 (PASS)"
       }
     }
+  },
+  "diagnostics": {
+    "entry": "入口",
+    "exit": "出口",
+    "testing": "檢測中…",
+    "failed": "檢測失敗",
+    "untested": "未檢測",
+    "unknown": "未知",
+    "unsupported": "不支援 UDP"
   }
 }

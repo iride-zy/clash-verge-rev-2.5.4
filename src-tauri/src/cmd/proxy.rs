@@ -58,13 +58,40 @@ pub async fn get_proxy_view() -> CmdResult<ProxyViewV1> {
 
     let mihomo = Handle::mihomo();
     let (proxies, providers) = tokio::join!(mihomo.get_proxies(), mihomo.get_proxy_providers(),);
-    let proxies = proxies.stringify_err()?;
+    let mut proxies = proxies.stringify_err()?;
+    let prefix = crate::core::node_diagnostics::config::PREFIX;
+    let diagnostics_generation = proxies
+        .proxies
+        .keys()
+        .filter(|name| name.starts_with(prefix))
+        .min()
+        .cloned();
+    proxies.proxies.retain(|name, _| !name.starts_with(prefix));
+    for proxy in proxies.proxies.values_mut() {
+        if let Some(all) = &mut proxy.all {
+            all.retain(|name| !name.starts_with(prefix));
+        }
+    }
 
-    Ok(ProxyViewBuilder::build(ProxyViewInput {
+    let mut view = ProxyViewBuilder::build(ProxyViewInput {
         runtime_group_order,
         proxies,
         providers: providers.ok(),
-    }))
+    });
+    view.diagnostics_generation = diagnostics_generation;
+    Ok(view)
+}
+
+#[tauri::command]
+pub async fn check_node_diagnostics(
+    name: String,
+    provider: Option<String>,
+    timeout: u64,
+    udp: bool,
+) -> CmdResult<crate::core::node_diagnostics::Report> {
+    crate::core::node_diagnostics::check(&name, provider.as_deref(), timeout, udp)
+        .await
+        .stringify_err()
 }
 
 #[tauri::command]

@@ -118,5 +118,14 @@
         "PASS": "تخطي هذه القاعدة عند المطابقة"
       }
     }
+  },
+  "diagnostics": {
+    "entry": "Entry",
+    "exit": "Exit",
+    "testing": "Testing…",
+    "failed": "Detection failed",
+    "untested": "Not tested",
+    "unknown": "Unknown",
+    "unsupported": "UDP unsupported"
   }
 }

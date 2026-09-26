@@ -21,6 +21,8 @@ import {
   type ResolvedProxyMember,
 } from '@/types/proxy-view'
 
+import { NodeNetworkInfo } from './node-network-info'
+
 interface Props {
   group: ProxyGroupView
   member: ResolvedProxyMember
@@ -58,10 +60,8 @@ export const ProxyItem = (props: Props) => {
   const now = member.kind === 'group' ? member.group.now : undefined
 
   // -1/<=0 为不显示，-2 为 loading
-  const { delayValue, isPreset, timeout, onDelay } = useProxyDelayState(
-    member,
-    group.name,
-  )
+  const { delayState, delayValue, isPreset, timeout, onDelay } =
+    useProxyDelayState(member, group.name)
 
   return (
     <ListItem sx={sx}>
@@ -92,12 +92,13 @@ export const ProxyItem = (props: Props) => {
               },
               backgroundColor: bgcolor,
               marginBottom: '8px',
-              height: '40px',
+              height: member.kind === 'node' ? '104px' : '40px',
             }
           },
         ]}
       >
         <ListItemText
+          sx={{ minWidth: 0 }}
           title={name}
           secondary={
             <>
@@ -127,6 +128,9 @@ export const ProxyItem = (props: Props) => {
               )}
               {!unresolved && showType && details?.smux && (
                 <TypeBox>SMUX</TypeBox>
+              )}
+              {member.kind === 'node' && (
+                <NodeNetworkInfo state={delayState.diagnostics} />
               )}
             </>
           }
