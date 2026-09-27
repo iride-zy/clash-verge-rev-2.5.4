@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "Lokasi",
       "delayCheck": "Periksa Keterlambatan",
+      "statusCheck": "Uji status",
       "sortDefault": "Urutkan secara default",
       "sortDelay": "Urutkan berdasarkan keterlambatan",
       "sortName": "Urutkan berdasarkan nama",

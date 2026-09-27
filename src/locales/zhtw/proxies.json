@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "目前節點",
       "delayCheck": "延遲測試",
+      "statusCheck": "狀態測試",
       "sortDefault": "預設排序",
       "sortDelay": "按延遲排序",
       "sortName": "按名稱排序",

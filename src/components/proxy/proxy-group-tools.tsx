@@ -1,4 +1,5 @@
 import AccessTimeRounded from '@mui/icons-material/AccessTimeRounded'
+import FactCheckRounded from '@mui/icons-material/FactCheckRounded'
 import MyLocationRounded from '@mui/icons-material/MyLocationRounded'
 import NetworkCheckRounded from '@mui/icons-material/NetworkCheckRounded'
 import SearchOffRounded from '@mui/icons-material/SearchOffRounded'
@@ -16,7 +17,7 @@ import { flushSync } from 'react-dom'
 import { useTranslation } from 'react-i18next'
 
 import { useVerge } from '@/hooks/use-verge'
-import delayManager from '@/services/delay'
+import delayManager, { type ProxyTestType } from '@/services/delay'
 import { showNotice } from '@/services/notice-service'
 import { isValidUrl } from '@/utils/network'
 
@@ -32,7 +33,7 @@ interface Props {
   groupName: string
   headState: HeadState
   onLocation: () => void
-  onCheckDelay: () => void
+  onCheckDelay: (testType?: ProxyTestType) => void
   onHeadState: (val: Partial<HeadState>) => void
 }
 
@@ -184,6 +185,30 @@ export const ProxyGroupTools = memo(function ProxyGroupTools(props: Props) {
         }}
       >
         <NetworkCheckRounded fontSize="inherit" />
+      </IconButton>
+
+      <IconButton
+        size="small"
+        color="inherit"
+        title={t('proxies.page.tooltips.statusCheck')}
+        onClick={(e) => {
+          e.preventDefault()
+          e.stopPropagation()
+          if (!headState.open)
+            // eslint-disable-next-line @eslint-react/dom-no-flush-sync
+            flushSync(() => onHeadState({ open: true }))
+          // Remind the user that it is custom test url
+          if (testUrl?.trim() && textState !== 'filter') {
+            onHeadState({ textState: 'url' })
+          }
+          if (testUrl?.trim() && !isValidUrl(testUrl)) {
+            showNotice.warning('proxies.feedback.warnings.invalidTestUrl')
+            return
+          }
+          onCheckDelay('status')
+        }}
+      >
+        <FactCheckRounded fontSize="inherit" />
       </IconButton>
 
       <IconButton

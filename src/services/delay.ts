@@ -16,6 +16,8 @@ import { isValidUrl } from '@/utils/network'
 
 import { checkNodeDiagnostics, type DiagnosticsState } from './node-diagnostics'
 
+export type ProxyTestType = 'delay' | 'status'
+
 export type DelaySnapshot = {
   of: (member: ResolvedProxyMember) => number
 }
@@ -304,7 +306,10 @@ class DelayManager {
     member: InteractableProxyMember,
     group: string,
     timeout: number,
+    testType: ProxyTestType = 'delay',
   ): Promise<DelayUpdate> {
+    if (testType === 'delay') return this.measureLatency(member, group, timeout)
+
     const key = JSON.stringify([
       this.diagnosticsGeneration,
       group,
@@ -429,6 +434,7 @@ class DelayManager {
     group: string,
     timeout: number,
     concurrency = 36,
+    testType: ProxyTestType = 'delay',
   ) {
     debugLog(
       `[DelayManager] 批量测试延迟开始，组: ${group}, 数量: ${proxies.length}, 并发数: ${concurrency}`,
@@ -458,7 +464,7 @@ class DelayManager {
         }
 
         // Do not reorder a list around the pointer while batch results are arriving.
-        await this.measureDelay(currMember, group, timeout)
+        await this.measureDelay(currMember, group, timeout, testType)
       } catch (error) {
         console.error(
           `[DelayManager] 批量测试单个代理出错，代理: ${currName}`,

@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "Aktueller Knoten",
       "delayCheck": "Latenztest",
+      "statusCheck": "Statusprüfung",
       "sortDefault": "Standard Sortierung",
       "sortDelay": "Nach Latenz sortieren",
       "sortName": "Nach Name sortieren",

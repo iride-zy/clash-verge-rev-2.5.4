@@ -289,6 +289,7 @@ export const translationKeys = [
   'proxies.page.labels.nodeCount',
   'proxies.page.tooltips.locate',
   'proxies.page.tooltips.delayCheck',
+  'proxies.page.tooltips.statusCheck',
   'proxies.page.tooltips.sortDefault',
   'proxies.page.tooltips.sortDelay',
   'proxies.page.tooltips.sortName',

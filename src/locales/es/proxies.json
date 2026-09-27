@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "Nodo actual",
       "delayCheck": "Prueba de latencia",
+      "statusCheck": "Prueba de estado",
       "sortDefault": "Ordenación predeterminada",
       "sortDelay": "Ordenar por latencia",
       "sortName": "Ordenar por nombre",

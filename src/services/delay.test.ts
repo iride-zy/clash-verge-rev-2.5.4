@@ -1,3 +1,4 @@
+import { delayProxyByName } from 'tauri-plugin-mihomo-api'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 vi.mock('tauri-plugin-mihomo-api', () => ({
@@ -5,9 +6,18 @@ vi.mock('tauri-plugin-mihomo-api', () => ({
   healthcheckNodeInProvider: vi.fn(async () => ({ delay: 120 })),
 }))
 
+vi.mock('./node-diagnostics', () => ({
+  checkNodeDiagnostics: vi.fn(async () => ({
+    entry: { ip: null, location: null, error: null },
+    exit: { ip: null, location: null, error: null },
+    nat: { kind: 'unknown', mappedAddress: null, detail: null },
+  })),
+}))
+
 import type { ResolvedProxyMember } from '@/types/proxy-view'
 
 import delayManager from './delay'
+import { checkNodeDiagnostics } from './node-diagnostics'
 
 const node = (name: string) =>
   ({
@@ -27,6 +37,7 @@ let settles = 0
 let unsubscribe: () => void
 
 beforeEach(() => {
+  vi.clearAllMocks()
   settles = 0
   unsubscribe = delayManager.addGroupListener('g', () => {
     settles += 1
@@ -57,5 +68,36 @@ describe('group delay completion', () => {
     expect(settles).toBe(1)
     expect(other).toBe(0)
     stop()
+  })
+})
+
+describe('proxy test types', () => {
+  test('single and batch delay checks do not run diagnostics', async () => {
+    await delayManager.checkDelay(node('latency-single') as never, 'g', 5000)
+    await delayManager.checkListDelay(
+      [node('latency-batch')] as never,
+      'g',
+      5000,
+    )
+
+    expect(delayProxyByName).toHaveBeenCalledTimes(2)
+    expect(checkNodeDiagnostics).not.toHaveBeenCalled()
+  })
+
+  test('status checks run latency and diagnostics and retain results on later delay checks', async () => {
+    const member = node('status-node')
+    await delayManager.checkListDelay([member] as never, 'g', 5000, 2, 'status')
+
+    expect(delayProxyByName).toHaveBeenCalledTimes(1)
+    expect(checkNodeDiagnostics).toHaveBeenCalledTimes(1)
+    const update = delayManager.getDelayUpdate('status-node', 'g')
+    expect(update?.delay).toBe(120)
+    expect(update?.diagnostics?.status).toBe('done')
+
+    await delayManager.checkDelay(member as never, 'g', 5000)
+    expect(checkNodeDiagnostics).toHaveBeenCalledTimes(1)
+    expect(
+      delayManager.getDelayUpdate('status-node', 'g')?.diagnostics,
+    ).toEqual(update?.diagnostics)
   })
 })

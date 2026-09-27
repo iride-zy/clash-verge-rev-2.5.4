@@ -1,5 +1,6 @@
 import {
   AccessTimeRounded,
+  FactCheckRounded,
   MyLocationRounded,
   NetworkCheckRounded,
   SearchOffRounded,
@@ -17,7 +18,7 @@ import { useTranslation } from 'react-i18next'
 
 import { BaseSearchBox } from '@/components/base'
 import { useVerge } from '@/hooks/use-verge'
-import delayManager from '@/services/delay'
+import delayManager, { type ProxyTestType } from '@/services/delay'
 import { showNotice } from '@/services/notice-service'
 import { debugLog } from '@/utils/debug'
 import { isValidUrl } from '@/utils/network'
@@ -31,7 +32,7 @@ interface Props {
   groupName: string
   headState: HeadState
   onLocation: () => void
-  onCheckDelay: () => void
+  onCheckDelay: (testType?: ProxyTestType) => void
   onHeadState: (val: Partial<HeadState>) => void
 }
 
@@ -105,6 +106,26 @@ export const ProxyHead = ({
         }}
       >
         <NetworkCheckRounded />
+      </IconButton>
+
+      <IconButton
+        size="small"
+        color="inherit"
+        title={t('proxies.page.tooltips.statusCheck')}
+        onClick={() => {
+          // Remind the user that it is custom test url
+          if (testUrl?.trim() && textState !== 'filter') {
+            debugLog(`[ProxyHead] 使用自定义测试URL: ${testUrl}`)
+            onHeadState({ textState: 'url' })
+          }
+          if (testUrl?.trim() && !isValidUrl(testUrl)) {
+            showNotice.warning('proxies.feedback.warnings.invalidTestUrl')
+            return
+          }
+          onCheckDelay('status')
+        }}
+      >
+        <FactCheckRounded />
       </IconButton>
 
       <IconButton

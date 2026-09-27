@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "locate",
       "delayCheck": "Delay check",
+      "statusCheck": "Status check",
       "sortDefault": "Sort by default",
       "sortDelay": "Sort by delay",
       "sortName": "Sort by name",

@@ -18,6 +18,7 @@ import { useTranslation } from 'react-i18next'
 
 import { useIconCache } from '@/hooks/use-icon-cache'
 import { useVerge } from '@/hooks/use-verge'
+import type { ProxyTestType } from '@/services/delay'
 import { useThemeMode } from '@/services/states'
 import type { ResolvedProxyMember } from '@/types/proxy-view'
 
@@ -34,7 +35,7 @@ interface RenderProps {
   stickyed?: boolean
   isChainMode?: boolean
   onLocation: (group: IRenderItem['group']) => void
-  onCheckAll: (groupName: string) => void
+  onCheckAll: (groupName: string, testType?: ProxyTestType) => void
   onHeadState: (groupName: string, patch: Partial<HeadState>) => void
   onChangeProxy: (
     group: IRenderItem['group'],
@@ -202,7 +203,7 @@ export const ProxyRender = memo(function ProxyRender(props: RenderProps) {
           groupName={group.name}
           headState={headState!}
           onLocation={() => onLocation(group)}
-          onCheckDelay={() => onCheckAll(group.name)}
+          onCheckDelay={(testType) => onCheckAll(group.name, testType)}
           onHeadState={(p) => onHeadState(group.name, p)}
         />
         {!toolsOnLeft && proxyCount}
@@ -251,7 +252,7 @@ export const ProxyRender = memo(function ProxyRender(props: RenderProps) {
         groupName={group.name}
         headState={headState!}
         onLocation={() => onLocation(group)}
-        onCheckDelay={() => onCheckAll(group.name)}
+        onCheckDelay={(testType) => onCheckAll(group.name, testType)}
         onHeadState={(p) => onHeadState(group.name, p)}
       />
     )

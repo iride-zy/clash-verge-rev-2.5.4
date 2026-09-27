@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "위치 찾기",
       "delayCheck": "지연 확인",
+      "statusCheck": "상태 테스트",
       "sortDefault": "기본 정렬",
       "sortDelay": "지연으로 정렬",
       "sortName": "이름으로 정렬",

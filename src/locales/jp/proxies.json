@@ -31,6 +31,7 @@
     "tooltips": {
       "locate": "現在のノード",
       "delayCheck": "遅延テスト",
+      "statusCheck": "状態テスト",
       "sortDefault": "デフォルトでソート",
       "sortDelay": "遅延でソート",
       "sortName": "名前でソート",

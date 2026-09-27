@@ -23,7 +23,7 @@ import { useProfiles } from '@/hooks/use-profiles'
 import { useProxySelection } from '@/hooks/use-proxy-selection'
 import { useVerge } from '@/hooks/use-verge'
 import { useProxiesData, useSystemData } from '@/providers/app-data-context'
-import delayManager from '@/services/delay'
+import delayManager, { type ProxyTestType } from '@/services/delay'
 import {
   isInteractableMember,
   resolveMember,
@@ -104,7 +104,7 @@ function useProxyRenderState(
   const timeout = verge?.default_latency_timeout || 10000
 
   const handleCheckAll = useStableCallback(
-    useLockFn(async (groupName: string) => {
+    useLockFn(async (groupName: string, testType: ProxyTestType = 'delay') => {
       debugLog(`[ProxyGroups] 开始测试所有延迟，组: ${groupName}`)
 
       const group =
@@ -127,7 +127,13 @@ function useProxyRenderState(
       debugLog(`[ProxyGroups] 测试URL: ${url}, 超时: ${timeout}ms`)
 
       try {
-        await delayManager.checkListDelay(interactable, groupName, timeout)
+        await delayManager.checkListDelay(
+          interactable,
+          groupName,
+          timeout,
+          undefined,
+          testType,
+        )
         debugLog(`[ProxyGroups] 延迟测试完成，组: ${groupName}`)
       } catch (error) {
         console.error(`[ProxyGroups] 延迟测试出错，组: ${groupName}`, error)
