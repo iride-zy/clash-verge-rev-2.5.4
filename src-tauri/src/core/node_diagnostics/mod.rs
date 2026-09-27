@@ -81,9 +81,9 @@ pub async fn check(name: &str, provider: Option<&str>, timeout_ms: u64, udp: boo
         }
     }
     let nat = if udp {
-        match tokio::time::timeout(duration, stun::check(*port)).await {
+        match tokio::time::timeout(stun::detection_timeout(timeout_ms), stun::check(*port)).await {
             Ok(Ok(result)) => result,
-            Ok(Err(error)) => stun::NatResult::unknown(&error.to_string()),
+            Ok(Err(error)) => stun::NatResult::unknown(&format!("{error:#}")),
             Err(_) => stun::NatResult::unknown("STUN timed out; this does not prove UDP is blocked"),
         }
     } else {

@@ -14,6 +14,16 @@ use tokio::{
 
 const COOKIE: [u8; 4] = [0x21, 0x12, 0xa4, 0x42];
 const SERVER: &str = "stunserver2025.stunprotocol.org";
+const RETRY_DELAYS_MS: [u64; 3] = [400, 800, 1200];
+// The first datagram also triggers DNS resolution and the proxy's UDP session setup.
+const INITIAL_RETRY_DELAYS_MS: [u64; 4] = [500, 1000, 2000, 4000];
+
+pub fn detection_timeout(timeout_ms: u64) -> Duration {
+    // Baseline, two filtering tests, alternate mapping, then baseline verification.
+    // Filtering timeouts are part of a successful test, not a failed latency probe.
+    let minimum_ms = INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 4 + 3000;
+    Duration::from_millis(timeout_ms.clamp(minimum_ms, 30000))
+}
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -153,6 +163,16 @@ async fn exchange(
     change: u32,
     expected_source: Option<SocketAddr>,
 ) -> Result<Option<(Binding, SocketAddr)>> {
+    exchange_with_retries(socket, target, change, expected_source, &RETRY_DELAYS_MS).await
+}
+
+async fn exchange_with_retries(
+    socket: &UdpSocket,
+    target: &[u8],
+    change: u32,
+    expected_source: Option<SocketAddr>,
+    retry_delays_ms: &[u64],
+) -> Result<Option<(Binding, SocketAddr)>> {
     let mut transaction = [0; 12];
     getrandom::fill(&mut transaction).map_err(|e| anyhow::anyhow!("STUN transaction: {e}"))?;
     let mut packet = vec![0, 0, 0];
@@ -165,7 +185,8 @@ async fn exchange(
         packet.extend_from_slice(&change.to_be_bytes());
     }
     let mut buffer = [0; 2048];
-    for wait in [400, 800, 1200] {
+    let mut invalid_packet = None;
+    for &wait in retry_delays_ms {
         socket.send(&packet).await?;
         let until = Instant::now() + Duration::from_millis(wait);
         loop {
@@ -173,8 +194,12 @@ async fn exchange(
                 Ok(result) => result?,
                 Err(_) => break,
             };
-            let Ok((source, message)) = unwrap_packet(&buffer[..count]) else {
-                continue;
+            let (source, message) = match unwrap_packet(&buffer[..count]) {
+                Ok(packet) => packet,
+                Err(error) => {
+                    invalid_packet = Some(error);
+                    continue;
+                }
             };
             if expected_source.is_some_and(|expected| source != expected) {
                 continue;
@@ -184,6 +209,9 @@ async fn exchange(
             }
             return Ok(Some((parse(message, &transaction)?, source)));
         }
+    }
+    if let Some(error) = invalid_packet {
+        return Err(error.context("received UDP replies but could not decode the SOCKS5 envelope"));
     }
     Ok(None)
 }
@@ -215,9 +243,9 @@ pub async fn check(port: u16) -> Result<NatResult> {
     let mut target = vec![3, SERVER.len() as u8];
     target.extend_from_slice(SERVER.as_bytes());
     target.extend_from_slice(&3478_u16.to_be_bytes());
-    let (first, primary) = exchange(&socket, &target, 0, None)
+    let (first, primary) = exchange_with_retries(&socket, &target, 0, None, &INITIAL_RETRY_DELAYS_MS)
         .await?
-        .context("no STUN response (UDP path or server unavailable)")?;
+        .with_context(|| format!("No initial STUN response from {SERVER}:3478 after 4 attempts / 7.5s; SOCKS5 UDP association succeeded. Check the core log for DNS or UDP forwarding errors; this does not prove UDP is blocked"))?;
     let mut result = NatResult {
         kind: "unknown",
         mapped_address: Some(first.mapped.to_string()),
@@ -273,6 +301,61 @@ pub async fn check(port: u16) -> Result<NatResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn initial_exchange_accepts_reply_after_udp_session_startup() {
+        let relay = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let client = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        client.connect(relay.local_addr().unwrap()).await.unwrap();
+        let target = socks_address("203.0.113.1:3478".parse().unwrap());
+        let server = async {
+            let mut request = [0; 128];
+            let (_, peer) = relay.recv_from(&mut request).await.unwrap();
+            // A valid response arrives after the old 2.4-second deadline.
+            tokio::time::sleep(Duration::from_millis(2600)).await;
+            let mut reply = vec![0, 0, 0];
+            reply.extend_from_slice(&target);
+            reply.extend_from_slice(&[1, 1, 0, 12]);
+            reply.extend_from_slice(&COOKIE);
+            reply.extend_from_slice(&request[18..30]);
+            reply.extend_from_slice(&[0, 1, 0, 8, 0, 1, 0x13, 0x88, 203, 0, 113, 11]);
+            relay.send_to(&reply, peer).await.unwrap();
+        };
+        let probe = exchange_with_retries(&client, &target, 0, None, &INITIAL_RETRY_DELAYS_MS);
+        let (_, result) = tokio::join!(server, probe);
+        let (binding, source) = result.unwrap().unwrap();
+        assert_eq!(binding.mapped.to_string(), "203.0.113.11:5000");
+        assert_eq!(source.to_string(), "203.0.113.1:3478");
+    }
+
+    #[tokio::test]
+    async fn malformed_udp_reply_is_not_reported_as_no_response() {
+        let relay = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        let client = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await.unwrap();
+        client.connect(relay.local_addr().unwrap()).await.unwrap();
+        let target = socks_address("203.0.113.1:3478".parse().unwrap());
+        let server = async {
+            let mut request = [0; 128];
+            let (_, peer) = relay.recv_from(&mut request).await.unwrap();
+            relay.send_to(&[0, 0, 1, 1], peer).await.unwrap();
+        };
+        let probe = exchange_with_retries(&client, &target, 0, None, &[100]);
+        let (_, result) = tokio::join!(server, probe);
+        let error = result.err().unwrap();
+        assert!(format!("{error:#}").contains("fragmented or invalid SOCKS5 UDP packet"));
+    }
+
+    #[test]
+    fn detection_budget_covers_all_exchanges_even_with_short_latency_timeout() {
+        let exchanges = Duration::from_millis(
+            INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 4,
+        );
+        for latency_timeout in [0, 1000, 3000, 5000, 10000] {
+            assert!(detection_timeout(latency_timeout) >= exchanges + Duration::from_secs(3));
+        }
+        assert_eq!(detection_timeout(25000), Duration::from_secs(25));
+        assert_eq!(detection_timeout(u64::MAX), Duration::from_secs(30));
+    }
 
     #[test]
     fn parses_xor_and_rejects_truncation_and_wrong_transaction() {
