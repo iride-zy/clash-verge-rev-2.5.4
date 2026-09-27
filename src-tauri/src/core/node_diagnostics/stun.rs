@@ -1,5 +1,5 @@
-//! RFC 5389/5780 over a single SOCKS5 UDP association in the running Mihomo core.
-//! A timeout is unknown, never evidence of a particular NAT type or blocked UDP.
+//! STUN candidates use independent SOCKS5 UDP associations in the running Mihomo core.
+//! Partial observations may yield an estimated type; silence alone never proves blocked UDP.
 use anyhow::{Context, Result, bail, ensure};
 use serde::Serialize;
 use std::{
@@ -9,19 +9,27 @@ use std::{
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
     net::{TcpStream, UdpSocket},
+    task::JoinSet,
     time::{Instant, timeout_at},
 };
 
 const COOKIE: [u8; 4] = [0x21, 0x12, 0xa4, 0x42];
-const SERVER: &str = "stunserver2025.stunprotocol.org";
+// Public STUN services are candidates, not assumed to be reachable or support discovery.
+// See stunprotocol.org and github.com/emercoin/emercoin/blob/master/src/gen-stun-list.c.
+const SERVERS: [&str; 3] = [
+    "stunserver2025.stunprotocol.org",
+    "stun.miwifi.com",
+    "stun.hot-chilli.net",
+];
 const RETRY_DELAYS_MS: [u64; 3] = [400, 800, 1200];
 // The first datagram also triggers DNS resolution and the proxy's UDP session setup.
 const INITIAL_RETRY_DELAYS_MS: [u64; 4] = [500, 1000, 2000, 4000];
 
 pub fn detection_timeout(timeout_ms: u64) -> Duration {
-    // Baseline, two filtering tests, alternate mapping, then baseline verification.
+    // Baseline, two filtering tests, two alternate targets, then baseline verification.
     // Filtering timeouts are part of a successful test, not a failed latency probe.
-    let minimum_ms = INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 4 + 3000;
+    let minimum_ms =
+        INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 5 + 3000;
     Duration::from_millis(timeout_ms.clamp(minimum_ms, 30000))
 }
 
@@ -29,6 +37,7 @@ pub fn detection_timeout(timeout_ms: u64) -> Duration {
 #[serde(rename_all = "camelCase")]
 pub struct NatResult {
     pub kind: &'static str,
+    pub estimated: bool,
     pub mapped_address: Option<String>,
     pub detail: Option<String>,
 }
@@ -37,6 +46,7 @@ impl NatResult {
     pub fn unknown(detail: &str) -> Self {
         Self {
             kind: "unknown",
+            estimated: false,
             mapped_address: None,
             detail: Some(detail.into()),
         }
@@ -108,6 +118,7 @@ fn parse(bytes: &[u8], transaction: &[u8; 12]) -> Result<Binding> {
             0x0020 => mapped = Some(address(value, true, transaction)?),
             0x0001 if mapped.is_none() => mapped = Some(address(value, false, transaction)?),
             0x802c => other = Some(address(value, false, transaction)?),
+            0x0005 if other.is_none() => other = Some(address(value, false, transaction)?),
             _ => {}
         }
         offset += (length + 3) & !3;
@@ -166,6 +177,77 @@ async fn exchange(
     exchange_with_retries(socket, target, change, expected_source, &RETRY_DELAYS_MS).await
 }
 
+fn classify(
+    first: SocketAddr,
+    filtering: Option<&'static str>,
+    alternate: Option<SocketAddr>,
+    baseline: Option<SocketAddr>,
+) -> NatResult {
+    let stable = baseline == Some(first);
+    let (kind, evidence) = if alternate.is_some_and(|mapped| mapped != first) {
+        ("symmetric", "Different destinations produced different public UDP mappings")
+    } else {
+        match filtering {
+            Some("full-cone") => ("full-cone", "Received a reply from the requested alternate IP and port"),
+            Some("restricted-cone") => (
+                "restricted-cone",
+                "Received a reply from the requested alternate port, but not from the alternate IP and port",
+            ),
+            Some("port-restricted-cone") if alternate.is_some() || baseline.is_some() => (
+                "port-restricted-cone",
+                "Both changed-source probes timed out, while an ordinary binding request still received a reply",
+            ),
+            _ => (
+                "unknown",
+                "Initial UDP binding succeeded, but subsequent evidence is insufficient to classify NAT",
+            ),
+        }
+    };
+    let estimated = kind != "unknown"
+        && (!stable || alternate.is_none() || matches!(kind, "restricted-cone" | "port-restricted-cone"));
+    let mut details = vec![evidence.to_owned()];
+    if alternate.is_none() {
+        details.push("Alternate mapping check unavailable; retained any observed filtering evidence".into());
+    }
+    if !stable {
+        details.push(if baseline.is_some() {
+            "Baseline mapping changed; mapping differences may reflect a changing path".into()
+        } else {
+            "Baseline recheck unavailable; retained earlier observations".into()
+        });
+    }
+    details.push(if estimated {
+        "Estimated proxy-path NAT type; packet loss or server behavior can affect the result".into()
+    } else {
+        "Observed proxy-path behavior".into()
+    });
+    NatResult {
+        kind,
+        estimated,
+        mapped_address: Some(first.to_string()),
+        detail: Some(details.join(". ")),
+    }
+}
+
+// Optional checks refine the result but must not erase evidence from successful checks.
+fn observation(
+    result: Result<Option<(Binding, SocketAddr)>>,
+    stage: &str,
+    notes: &mut Vec<String>,
+) -> Option<Binding> {
+    match result {
+        Ok(Some((binding, _))) => Some(binding),
+        Ok(None) => {
+            notes.push(format!("{stage}: no response after retries"));
+            None
+        }
+        Err(error) => {
+            notes.push(format!("{stage}: {error:#}"));
+            None
+        }
+    }
+}
+
 async fn exchange_with_retries(
     socket: &UdpSocket,
     target: &[u8],
@@ -216,7 +298,63 @@ async fn exchange_with_retries(
     Ok(None)
 }
 
-pub async fn check(port: u16) -> Result<NatResult> {
+fn result_rank(result: &NatResult) -> u8 {
+    match (result.kind, result.estimated, result.mapped_address.is_some()) {
+        ("unknown", _, false) => 0,
+        ("unknown", _, true) => 1,
+        (_, true, _) => 2,
+        _ => 3,
+    }
+}
+
+pub async fn check(port: u16, timeout_ms: u64) -> Result<NatResult> {
+    let deadline = Instant::now() + detection_timeout(timeout_ms);
+    let mut probes = JoinSet::new();
+    // Each server gets a separate source port: probing one must not open the other's filter.
+    // At most three candidates run, all through the already-selected private node inlet.
+    for server in SERVERS {
+        probes.spawn(async move { (server, check_server(port, server).await) });
+    }
+    let mut best = NatResult::unknown("No usable STUN observations");
+    let mut attempts = Vec::new();
+    while !probes.is_empty() {
+        match timeout_at(deadline, probes.join_next()).await {
+            Ok(Some(Ok((server, Ok(mut result))))) => {
+                attempts.push(format!("{server}: {}", result.detail.as_deref().unwrap_or(result.kind)));
+                result.detail = Some(format!(
+                    "STUN {server}:3478. {}",
+                    result.detail.as_deref().unwrap_or_default(),
+                ));
+                if result_rank(&result) > result_rank(&best) {
+                    best = result;
+                }
+                if result_rank(&best) == 3 {
+                    break;
+                }
+            }
+            Ok(Some(Ok((server, Err(error))))) => attempts.push(format!("{server}: {error:#}")),
+            Ok(Some(Err(error))) => attempts.push(format!("STUN task failed: {error}")),
+            Ok(None) => break,
+            Err(_) => {
+                attempts.push("Overall STUN deadline reached; retained completed observations".into());
+                break;
+            }
+        }
+    }
+    // Close every association before the caller changes the private group's selected node.
+    probes.abort_all();
+    while probes.join_next().await.is_some() {}
+    if !attempts.is_empty() {
+        best.detail = Some(format!(
+            "{}\nAttempts:\n{}",
+            best.detail.as_deref().unwrap_or_default(),
+            attempts.join("\n"),
+        ));
+    }
+    Ok(best)
+}
+
+async fn check_server(port: u16, server: &str) -> Result<NatResult> {
     let mut control = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
     control.write_all(&[5, 1, 0]).await?;
     let mut response = [0; 2];
@@ -240,14 +378,15 @@ pub async fn check(port: u16) -> Result<NatResult> {
     let relay_port = u16::from_be_bytes([relay[length - 2], relay[length - 1]]);
     ensure!(relay_port == port, "unexpected SOCKS5 relay port");
     socket.connect((Ipv4Addr::LOCALHOST, port)).await?;
-    let mut target = vec![3, SERVER.len() as u8];
-    target.extend_from_slice(SERVER.as_bytes());
+    let mut target = vec![3, server.len() as u8];
+    target.extend_from_slice(server.as_bytes());
     target.extend_from_slice(&3478_u16.to_be_bytes());
     let (first, primary) = exchange_with_retries(&socket, &target, 0, None, &INITIAL_RETRY_DELAYS_MS)
         .await?
-        .with_context(|| format!("No initial STUN response from {SERVER}:3478 after 4 attempts / 7.5s; SOCKS5 UDP association succeeded. Check the core log for DNS or UDP forwarding errors; this does not prove UDP is blocked"))?;
+        .with_context(|| format!("No initial STUN response from {server}:3478 after 4 attempts / 7.5s; SOCKS5 UDP association succeeded. Check the core log for DNS or UDP forwarding errors; this does not prove UDP is blocked"))?;
     let mut result = NatResult {
         kind: "unknown",
+        estimated: false,
         mapped_address: Some(first.mapped.to_string()),
         detail: None,
     };
@@ -260,40 +399,66 @@ pub async fn check(port: u16) -> Result<NatResult> {
     };
     let primary_target = socks_address(primary);
     // Filtering must run before contacting the alternate endpoint, which would open a pinhole.
-    let filtering = if exchange(&socket, &primary_target, 6, Some(other)).await?.is_some() {
-        "full-cone"
-    } else if exchange(
-        &socket,
-        &primary_target,
-        2,
-        Some(SocketAddr::new(primary.ip(), other.port())),
-    )
-    .await?
-    .is_some()
-    {
-        "restricted-cone"
+    let mut notes = Vec::new();
+    let changed_source = exchange(&socket, &primary_target, 6, Some(other)).await;
+    let full_timeout = matches!(&changed_source, Ok(None));
+    let filtering = if observation(changed_source, "Change IP and port", &mut notes).is_some() {
+        Some("full-cone")
     } else {
-        "port-restricted-cone"
+        let changed_port = exchange(
+            &socket,
+            &primary_target,
+            2,
+            Some(SocketAddr::new(primary.ip(), other.port())),
+        )
+        .await;
+        let port_timeout = matches!(&changed_port, Ok(None));
+        if observation(changed_port, "Change port", &mut notes).is_some() {
+            Some("restricted-cone")
+        } else if full_timeout && port_timeout {
+            Some("port-restricted-cone")
+        } else {
+            None
+        }
     };
-    let Some((alternate, _)) = exchange(&socket, &socks_address(other), 0, Some(other)).await? else {
-        result.detail = Some("Alternate STUN endpoint unavailable; NAT type is indeterminate".into());
-        return Ok(result);
-    };
-    // Verify the baseline still responds; do not classify an interrupted path from timeouts.
-    let Some((baseline, _)) = exchange(&socket, &primary_target, 0, Some(primary)).await? else {
-        result.detail = Some("STUN baseline lost during detection".into());
-        return Ok(result);
-    };
-    if baseline.mapped != first.mapped {
-        result.detail = Some("UDP mapping changed during detection".into());
-        return Ok(result);
+    let mut alternate = observation(
+        exchange(&socket, &socks_address(other), 0, Some(other)).await,
+        "Alternate mapping check",
+        &mut notes,
+    );
+    let used_alternate_port_fallback = alternate.is_none();
+    if used_alternate_port_fallback {
+        // Some paths block the alternate port. A different IP at the original port
+        // still provides mapping evidence, after filtering observations are complete.
+        let other_primary_port = SocketAddr::new(other.ip(), primary.port());
+        alternate = observation(
+            exchange(&socket, &socks_address(other_primary_port), 0, Some(other_primary_port)).await,
+            "Alternate IP with primary port",
+            &mut notes,
+        );
     }
-    result.kind = if alternate.mapped != first.mapped {
-        "symmetric"
-    } else {
-        filtering
-    };
-    result.detail = Some("Observed proxy-path behavior; filtering timeouts can also indicate packet loss".into());
+    let baseline = observation(
+        exchange(&socket, &primary_target, 0, Some(primary)).await,
+        "Baseline recheck",
+        &mut notes,
+    );
+    result = classify(
+        first.mapped,
+        filtering,
+        alternate.map(|b| b.mapped),
+        baseline.map(|b| b.mapped),
+    );
+    if used_alternate_port_fallback && result.kind != "unknown" {
+        result.estimated = true;
+        notes.push("Estimated type: the original alternate IP/port could not be verified".into());
+    }
+    if !notes.is_empty() {
+        result.detail = Some(format!(
+            "{}. {}",
+            result.detail.as_deref().unwrap_or_default(),
+            notes.join(". "),
+        ));
+    }
     drop(control);
     Ok(result)
 }
@@ -301,6 +466,58 @@ pub async fn check(port: u16) -> Result<NatResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn partial_evidence_retains_all_four_nat_types() {
+        let first: SocketAddr = "203.0.113.11:5000".parse().unwrap();
+        let changed: SocketAddr = "203.0.113.11:6000".parse().unwrap();
+        let cases = [
+            (Some("full-cone"), None, None, "full-cone", true),
+            (Some("restricted-cone"), None, None, "restricted-cone", true),
+            (Some("port-restricted-cone"), None, Some(first), "port-restricted-cone", true),
+            (Some("port-restricted-cone"), Some(first), None, "port-restricted-cone", true),
+            (None, Some(changed), None, "symmetric", true),
+            (Some("full-cone"), Some(changed), Some(first), "symmetric", false),
+            (None, Some(changed), Some(changed), "symmetric", true),
+            (Some("full-cone"), Some(first), Some(first), "full-cone", false),
+            // An interrupted UDP path and malformed filtering probes are not port restriction.
+            (Some("port-restricted-cone"), None, None, "unknown", false),
+            (None, Some(first), Some(first), "unknown", false),
+        ];
+        for (filtering, alternate, baseline, kind, estimated) in cases {
+            let result = classify(first, filtering, alternate, baseline);
+            assert_eq!((result.kind, result.estimated), (kind, estimated));
+            assert_eq!(result.mapped_address.as_deref(), Some("203.0.113.11:5000"));
+            assert!(result.detail.is_some());
+        }
+    }
+
+    #[test]
+    fn failed_candidates_cannot_replace_mapping_or_type_evidence() {
+        let first: SocketAddr = "203.0.113.11:5000".parse().unwrap();
+        let failed = NatResult::unknown("candidate timed out");
+        let mapped = classify(first, None, None, None);
+        let estimated = classify(first, Some("restricted-cone"), None, None);
+        let verified = classify(first, Some("full-cone"), Some(first), Some(first));
+        assert!(result_rank(&failed) < result_rank(&mapped));
+        assert!(result_rank(&mapped) < result_rank(&estimated));
+        assert!(result_rank(&estimated) < result_rank(&verified));
+    }
+
+    #[test]
+    fn accepts_legacy_changed_address_without_overriding_other_address() {
+        let transaction = [7; 12];
+        let mut bytes = vec![1, 1, 0, 36];
+        bytes.extend_from_slice(&COOKIE);
+        bytes.extend_from_slice(&transaction);
+        bytes.extend_from_slice(&[0, 1, 0, 8, 0, 1, 0x13, 0x88, 203, 0, 113, 11]);
+        bytes.extend_from_slice(&[0x80, 0x2c, 0, 8, 0, 1, 0x0d, 0x97, 203, 0, 113, 2]);
+        bytes.extend_from_slice(&[0, 5, 0, 8, 0, 1, 0x0d, 0x97, 203, 0, 113, 3]);
+        assert_eq!(parse(&bytes, &transaction).unwrap().other.unwrap().to_string(), "203.0.113.2:3479");
+        bytes.drain(32..44);
+        bytes[3] = 24;
+        assert_eq!(parse(&bytes, &transaction).unwrap().other.unwrap().to_string(), "203.0.113.3:3479");
+    }
 
     #[tokio::test]
     async fn initial_exchange_accepts_reply_after_udp_session_startup() {
@@ -348,7 +565,7 @@ mod tests {
     #[test]
     fn detection_budget_covers_all_exchanges_even_with_short_latency_timeout() {
         let exchanges = Duration::from_millis(
-            INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 4,
+            INITIAL_RETRY_DELAYS_MS.iter().sum::<u64>() + RETRY_DELAYS_MS.iter().sum::<u64>() * 5,
         );
         for latency_timeout in [0, 1000, 3000, 5000, 10000] {
             assert!(detection_timeout(latency_timeout) >= exchanges + Duration::from_secs(3));

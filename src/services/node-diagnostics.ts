@@ -18,6 +18,7 @@ export interface NodeDiagnostics {
       | 'port-restricted-cone'
       | 'symmetric'
     mappedAddress: string | null
+    estimated?: boolean
     detail: string | null
   }
 }

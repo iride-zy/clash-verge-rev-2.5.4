@@ -36,7 +36,7 @@ export function NodeNetworkInfo({ state }: { state?: DiagnosticsState }) {
           ? NAT_NAMES[nat]
           : fallback
   const lines = [
-    `UDP NAT: ${natText}`,
+    `UDP NAT: ${result?.nat.estimated ? '≈ ' : ''}${natText}`,
     `${t('proxies.diagnostics.entry')}: ${endpoint(result?.entry)}`,
     `${t('proxies.diagnostics.exit')}: ${endpoint(result?.exit)}`,
   ]
