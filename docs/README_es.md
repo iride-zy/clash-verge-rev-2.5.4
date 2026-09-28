@@ -28,16 +28,16 @@ Una interfaz gráfica para Clash Meta construida con <a href="https://github.com
 
 ## Instalación
 
-Visita la [página de lanzamientos](https://github.com/clash-verge-rev/clash-verge-rev/releases) y descarga el instalador que corresponda a tu plataforma.<br>
+Visita la [página de lanzamientos](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases) y descarga el instalador que corresponda a tu plataforma.<br>
 Ofrecemos paquetes para Windows (x64/x86), Linux (x64/arm64) y macOS 10.15+ (Intel/Apple).
 
 #### Cómo elegir el canal de lanzamiento
 
 | Canal       | Descripción                                                                    | Enlace                                                                                 |
 | :---------- | :----------------------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| Stable      | Compilaciones oficiales de alta fiabilidad; ideales para el uso diario.        | [Release](https://github.com/clash-verge-rev/clash-verge-rev/releases)                 |
-| Alpha (EOL) | Compilaciones heredadas usadas para validar el flujo de publicación.           | [Alpha](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/alpha)         |
-| AutoBuild   | Compilaciones continuas para pruebas y retroalimentación. Espera cambios beta. | [AutoBuild](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/autobuild) |
+| Stable      | Compilaciones oficiales de alta fiabilidad; ideales para el uso diario.        | [Release](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases)                 |
+| Alpha (EOL) | Compilaciones heredadas usadas para validar el flujo de publicación.           | [Alpha](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/alpha)         |
+| AutoBuild   | Compilaciones continuas para pruebas y retroalimentación. Espera cambios beta. | [AutoBuild](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/autobuild) |
 
 #### Guías de instalación y preguntas frecuentes
 

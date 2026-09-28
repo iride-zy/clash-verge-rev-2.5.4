@@ -28,16 +28,16 @@
 
 ## インストール
 
-[リリースページ](https://github.com/clash-verge-rev/clash-verge-rev/releases) から、ご利用のプラットフォームに対応したインストーラーをダウンロードしてください。<br>
+[リリースページ](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases) から、ご利用のプラットフォームに対応したインストーラーをダウンロードしてください。<br>
 Windows (x64/x86)、Linux (x64/arm64)、macOS 10.15+ (Intel/Apple) をサポートしています。
 
 #### リリースチャンネルの選び方
 
 | チャンネル  | 説明                                                             | リンク                                                                                 |
 | :---------- | :--------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| Stable      | 安定版。信頼性が高く、日常利用に最適です。                       | [Release](https://github.com/clash-verge-rev/clash-verge-rev/releases)                 |
-| Alpha (EOL) | 公開フローの検証に使用した旧テスト版。                           | [Alpha](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/alpha)         |
-| AutoBuild   | 継続的に更新されるテスト版。フィードバックや新機能検証向けです。 | [AutoBuild](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/autobuild) |
+| Stable      | 安定版。信頼性が高く、日常利用に最適です。                       | [Release](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases)                 |
+| Alpha (EOL) | 公開フローの検証に使用した旧テスト版。                           | [Alpha](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/alpha)         |
+| AutoBuild   | 継続的に更新されるテスト版。フィードバックや新機能検証向けです。 | [AutoBuild](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/autobuild) |
 
 #### インストール手順と FAQ
 

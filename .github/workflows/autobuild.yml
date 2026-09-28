@@ -67,7 +67,7 @@ jobs:
           echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
           VERSION=$(jq -r .version package.json)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "DOWNLOAD_URL=https://github.com/clash-verge-rev/clash-verge-rev/releases/download/autobuild" >> $GITHUB_ENV
+          echo "DOWNLOAD_URL=https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/download/autobuild" >> $GITHUB_ENV
         shell: bash
 
       - run: |

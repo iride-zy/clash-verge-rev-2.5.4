@@ -107,7 +107,7 @@ jobs:
           echo "TAG_NAME=$TAG_REF" >> $GITHUB_ENV
           VERSION=$(echo "$TAG_REF" | sed 's/^v//')
           echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "DOWNLOAD_URL=https://github.com/clash-verge-rev/clash-verge-rev/releases/download/$TAG_REF" >> $GITHUB_ENV
+          echo "DOWNLOAD_URL=https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/download/$TAG_REF" >> $GITHUB_ENV
         shell: bash
 
       - run: |

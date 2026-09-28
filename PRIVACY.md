@@ -2,7 +2,7 @@
 
 **Applies to:** the Clash Verge Rev desktop application for Windows, macOS and
 Linux, distributed from
-<https://github.com/clash-verge-rev/clash-verge-rev/releases>.
+<https://github.com/iride-zy/clash-verge-rev-2.5.4/releases>.
 
 **Last updated:** 2026-09-09
 
@@ -96,7 +96,7 @@ On startup the application asks whether a newer release exists, in order, from:
 
 - `https://update.hwdns.net/…` and `https://gh-proxy.org/…` (third-party GitHub
   mirrors, used for reachability in restricted networks)
-- `https://github.com/clash-verge-rev/clash-verge-rev/releases/…`
+- `https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/…`
 
 The request carries only what any HTTP request carries: your IP address, the
 `User-Agent` and the requested file. No identifier is generated or sent, and no
