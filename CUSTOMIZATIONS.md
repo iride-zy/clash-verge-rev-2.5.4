@@ -53,3 +53,22 @@ location. If upstream implements a listed feature, verify whether the fork's
 version can be retired before deleting its code. Preserve upstream security
 fixes while adapting the fork behavior; do not resolve a conflict by keeping
 the fork side wholesale without reviewing the incoming logic.
+
+
+# add
+git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git
+添加upstream对应原作者
+
+# release
+
+## 同步四处内部版本号
+pnpm release-version 2.5.6+1
+
+## 提交并推送
+git add package.json src-tauri/Cargo.toml Cargo.lock src-tauri/tauri.conf.json
+git commit -m "chore(release): 2.5.6+1"
+git push origin main
+
+## 创建独立发布，触发 Release Build
+git tag v2.5.6.1
+git push origin v2.5.6.1
