@@ -189,10 +189,11 @@ jobs:
             target: x86_64-pc-windows-msvc
           - os: windows-latest
             target: aarch64-pc-windows-msvc
-          - os: macos-latest
-            target: aarch64-apple-darwin
-          - os: macos-latest
-            target: x86_64-apple-darwin
+          # Disabled until valid macOS signing certificates are configured.
+          # - os: macos-latest
+          #   target: aarch64-apple-darwin
+          # - os: macos-latest
+          #   target: x86_64-apple-darwin
           - os: ubuntu-22.04
             target: x86_64-unknown-linux-gnu
 
@@ -288,11 +289,12 @@ jobs:
             target/${{ matrix.target }}/release/bundle/nsis/*setup*
             target/${{ matrix.target }}/release/bundle/portable/*.zip
 
-      - name: Attest macOS bundles
-        if: matrix.os == 'macos-latest'
-        uses: actions/attest-build-provenance@v4
-        with:
-          subject-path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
+      # Disabled with the macOS build matrix entries above.
+      # - name: Attest macOS bundles
+      #   if: matrix.os == 'macos-latest'
+      #   uses: actions/attest-build-provenance@v4
+      #   with:
+      #     subject-path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
 
       - name: Attest Linux bundles
         if: matrix.os == 'ubuntu-22.04'
