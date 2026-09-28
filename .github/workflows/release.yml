@@ -48,7 +48,7 @@ jobs:
           PKG_VERSION=$(jq -r .version package.json)
           echo "package.json version: $PKG_VERSION"
 
-          EXPECTED_TAG="v$PKG_VERSION"
+          EXPECTED_TAG=$(node --input-type=module -e 'import { releaseTagForVersion } from "./scripts/release-version-map.mjs"; console.log(releaseTagForVersion(process.argv[1]))' "$PKG_VERSION")
 
           if [[ "$TAG_REF" != "$EXPECTED_TAG" ]]; then
             echo "❌ Version mismatch:"
@@ -105,7 +105,7 @@ jobs:
           echo "BUILDTIME=$(TZ=Asia/Shanghai date)" >> $GITHUB_ENV
           TAG_REF="${GITHUB_REF##*/}"
           echo "TAG_NAME=$TAG_REF" >> $GITHUB_ENV
-          VERSION=$(echo "$TAG_REF" | sed 's/^v//')
+          VERSION=$(jq -r .version package.json)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "DOWNLOAD_URL=https://github.com/iride-zy/clash-verge-rev-2.5.4/releases/download/$TAG_REF" >> $GITHUB_ENV
         shell: bash
@@ -597,7 +597,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   submit-to-winget:
-    if: ${{ !contains(github.ref_name, '-rc') }}
+    if: ${{ github.repository == 'clash-verge-rev/clash-verge-rev' && !contains(github.ref_name, '-rc') }}
     name: Submit to Winget
     runs-on: ubuntu-latest
     needs: [update_tag, release-update]

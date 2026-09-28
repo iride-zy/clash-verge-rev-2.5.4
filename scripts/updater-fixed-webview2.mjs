@@ -1,5 +1,6 @@
 import { context, getOctokit } from '@actions/github'
 
+import { updaterVersionForTag } from './release-version-map.mjs'
 import { resolveUpdateLog } from './updatelog.mjs'
 
 const UPDATE_TAG_NAME = 'updater'
@@ -22,7 +23,7 @@ async function resolveUpdater() {
   console.log()
 
   const updateData = {
-    name: tag.name,
+    name: updaterVersionForTag(tag.name),
     notes: await resolveUpdateLog(tag.name), // use Changelog.md
     pub_date: new Date().toISOString(),
     platforms: {

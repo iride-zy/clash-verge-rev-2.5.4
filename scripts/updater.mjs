@@ -1,5 +1,6 @@
 import { context, getOctokit } from '@actions/github'
 
+import { updaterVersionForTag } from './release-version-map.mjs'
 import { resolveUpdateLog, resolveUpdateLogDefault } from './updatelog.mjs'
 
 const UPDATE_TAG_NAME = 'updater'
@@ -79,7 +80,7 @@ async function processRelease(github, options, tag, isAlpha) {
     const releaseUrl = `https://github.com/${options.owner}/${options.repo}/releases/tag/${tag.name}`
 
     const updateData = {
-      name: tag.name,
+      name: updaterVersionForTag(tag.name),
       notes: `${notes}\n\n**[See More](${releaseUrl})**`,
       pub_date: new Date().toISOString(),
       platforms: {
