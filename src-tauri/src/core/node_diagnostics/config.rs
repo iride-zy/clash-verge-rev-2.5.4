@@ -5,6 +5,14 @@ use std::net::{TcpListener, UdpSocket};
 
 pub const PREFIX: &str = "__verge_probe_";
 
+// Deliberately neither Debug nor Serialize: proxy credentials stay in the backend.
+#[derive(PartialEq, Eq)]
+pub struct ProbeEndpoint {
+    pub group: String,
+    pub port: u16,
+    pub credentials: Option<(String, String)>,
+}
+
 pub fn install(mut config: Mapping) -> Result<Mapping> {
     let mut nonce = [0_u8; 8];
     getrandom::fill(&mut nonce).map_err(|e| anyhow::anyhow!("probe nonce: {e}"))?;
@@ -50,8 +58,9 @@ pub fn install(mut config: Mapping) -> Result<Mapping> {
             group.insert("proxies".into(), Value::Sequence(names.clone()));
         }
         groups.push(Value::Mapping(group));
+        // Omit users so Mihomo applies the normal ports' global authentication policy.
         let listener = serde_yaml_ng::from_str::<Value>(&format!(
-            "name: {name}\ntype: mixed\nlisten: 127.0.0.1\nport: {port}\nudp: true\nproxy: {name}\nusers: []\n"
+            "name: {name}\ntype: mixed\nlisten: 127.0.0.1\nport: {port}\nudp: true\nproxy: {name}\n"
         ))?;
         listeners.push(listener);
     }
@@ -86,7 +95,7 @@ fn reserve_port(config: &Mapping) -> Result<(TcpListener, UdpSocket)> {
     bail!("could not reserve diagnostic TCP/UDP port")
 }
 
-pub fn endpoint(config: &Mapping, provider: Option<&str>) -> Result<(String, u16)> {
+pub fn endpoint(config: &Mapping, provider: Option<&str>) -> Result<ProbeEndpoint> {
     let groups = config
         .get("proxy-groups")
         .and_then(Value::as_sequence)
@@ -117,5 +126,48 @@ pub fn endpoint(config: &Mapping, provider: Option<&str>) -> Result<(String, u16
         .and_then(|l| l.get("port"))
         .and_then(Value::as_u64)
         .context("missing probe port")?;
-    Ok((name.to_owned(), u16::try_from(port)?))
+    // Mihomo splits authentication entries at the first colon and ignores entries without one.
+    // Use the last entry so a later password for the same username cannot invalidate our choice.
+    let credentials = config
+        .get("authentication")
+        .and_then(Value::as_sequence)
+        .into_iter()
+        .flatten()
+        .filter_map(Value::as_str)
+        .filter_map(|entry| entry.split_once(':'))
+        .next_back()
+        .map(|(username, password)| (username.to_owned(), password.to_owned()));
+    Ok(ProbeEndpoint {
+        group: name.to_owned(),
+        port: u16::try_from(port)?,
+        credentials,
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn diagnostic_listener_inherits_global_authentication() -> Result<()> {
+        let config: Mapping = serde_yaml_ng::from_str(
+            "proxies: [{name: example, type: direct}]\nauthentication: ['user:old', 'user:new:password']\nskip-auth-prefixes: ['127.0.0.1/32']\n",
+        )?;
+        let installed = install(config.clone())?;
+        assert_eq!(installed.get("authentication"), config.get("authentication"));
+        assert_eq!(installed.get("skip-auth-prefixes"), config.get("skip-auth-prefixes"));
+        let listeners = installed.get("listeners").and_then(Value::as_sequence).unwrap();
+        assert_eq!(listeners.len(), 1);
+        assert!(listeners[0].get("users").is_none());
+        let endpoint = endpoint(&installed, None)?;
+        assert_eq!(endpoint.credentials, Some(("user".into(), "new:password".into())));
+        Ok(())
+    }
+
+    #[test]
+    fn diagnostic_listener_supports_no_global_credentials() -> Result<()> {
+        let config = install(serde_yaml_ng::from_str("proxies: [{name: example, type: direct}]\n")?)?;
+        assert!(endpoint(&config, None)?.credentials.is_none());
+        Ok(())
+    }
 }

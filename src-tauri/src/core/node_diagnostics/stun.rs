@@ -307,13 +307,14 @@ fn result_rank(result: &NatResult) -> u8 {
     }
 }
 
-pub async fn check(port: u16, timeout_ms: u64) -> Result<NatResult> {
+pub async fn check(port: u16, timeout_ms: u64, credentials: Option<&(String, String)>) -> Result<NatResult> {
     let deadline = Instant::now() + detection_timeout(timeout_ms);
     let mut probes = JoinSet::new();
     // Each server gets a separate source port: probing one must not open the other's filter.
     // At most three candidates run, all through the already-selected private node inlet.
     for server in SERVERS {
-        probes.spawn(async move { (server, check_server(port, server).await) });
+        let credentials = credentials.cloned();
+        probes.spawn(async move { (server, check_server(port, server, credentials.as_ref()).await) });
     }
     let mut best = NatResult::unknown("No usable STUN observations");
     let mut attempts = Vec::new();
@@ -354,12 +355,36 @@ pub async fn check(port: u16, timeout_ms: u64) -> Result<NatResult> {
     Ok(best)
 }
 
-async fn check_server(port: u16, server: &str) -> Result<NatResult> {
-    let mut control = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
-    control.write_all(&[5, 1, 0]).await?;
+async fn authenticate(control: &mut TcpStream, credentials: Option<&(String, String)>) -> Result<()> {
+    // Offer no-auth as well: the normal global skip-auth-prefixes policy may apply to loopback.
+    let methods: &[u8] = if credentials.is_some() { &[5, 2, 0, 2] } else { &[5, 1, 0] };
+    control.write_all(methods).await?;
     let mut response = [0; 2];
     control.read_exact(&mut response).await?;
-    ensure!(response == [5, 0], "SOCKS5 authentication rejected");
+    match response {
+        [5, 0] => Ok(()),
+        [5, 2] => {
+            let (username, password) = credentials.context("SOCKS5 proxy requires credentials")?;
+            ensure!(
+                (1..=255).contains(&username.len()) && (1..=255).contains(&password.len()),
+                "proxy credentials cannot be represented in SOCKS5 username/password authentication"
+            );
+            let mut packet = vec![1, username.len() as u8];
+            packet.extend_from_slice(username.as_bytes());
+            packet.push(password.len() as u8);
+            packet.extend_from_slice(password.as_bytes());
+            control.write_all(&packet).await?;
+            control.read_exact(&mut response).await?;
+            ensure!(response == [1, 0], "SOCKS5 authentication rejected");
+            Ok(())
+        }
+        _ => bail!("SOCKS5 authentication rejected"),
+    }
+}
+
+async fn check_server(port: u16, server: &str, credentials: Option<&(String, String)>) -> Result<NatResult> {
+    let mut control = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
+    authenticate(&mut control, credentials).await?;
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let mut associate = vec![5, 3, 0];
     associate.extend_from_slice(&socks_address(socket.local_addr()?));
@@ -466,6 +491,63 @@ async fn check_server(port: u16, server: &str) -> Result<NatResult> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn socks_authentication_uses_existing_credentials_and_honors_rejection() -> Result<()> {
+        for status in [0, 1] {
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+            let address = listener.local_addr()?;
+            let server = async {
+                let (mut stream, _) = listener.accept().await?;
+                let mut methods = [0; 4];
+                stream.read_exact(&mut methods).await?;
+                ensure!(methods == [5, 2, 0, 2], "missing authentication methods");
+                stream.write_all(&[5, 2]).await?;
+                let mut auth = [0; 12];
+                stream.read_exact(&mut auth).await?;
+                ensure!(auth == *b"\x01\x04user\x05p:a@s", "incorrect credential encoding");
+                stream.write_all(&[1, status]).await?;
+                Ok::<_, anyhow::Error>(())
+            };
+            let client = async {
+                let mut stream = TcpStream::connect(address).await?;
+                authenticate(&mut stream, Some(&("user".into(), "p:a@s".into()))).await
+            };
+            let (server, client) =
+                tokio::time::timeout(Duration::from_secs(3), async { tokio::join!(server, client) }).await?;
+            server?;
+            assert_eq!(client.is_ok(), status == 0);
+        }
+        Ok(())
+    }
+
+    #[tokio::test]
+    async fn socks_authentication_allows_the_normal_no_auth_policy() -> Result<()> {
+        for credentials in [None, Some(("user".into(), "password".into()))] {
+            let listener = tokio::net::TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+            let address = listener.local_addr()?;
+            let server = async {
+                let (mut stream, _) = listener.accept().await?;
+                let mut header = [0; 2];
+                stream.read_exact(&mut header).await?;
+                ensure!(header[0] == 5, "incorrect SOCKS version");
+                let mut methods = vec![0; usize::from(header[1])];
+                stream.read_exact(&mut methods).await?;
+                ensure!(methods.contains(&0), "no-auth was not offered");
+                stream.write_all(&[5, 0]).await?;
+                Ok::<_, anyhow::Error>(())
+            };
+            let client = async {
+                let mut stream = TcpStream::connect(address).await?;
+                authenticate(&mut stream, credentials.as_ref()).await
+            };
+            let (server, client) =
+                tokio::time::timeout(Duration::from_secs(3), async { tokio::join!(server, client) }).await?;
+            server?;
+            client?;
+        }
+        Ok(())
+    }
 
     #[test]
     fn partial_evidence_retains_all_four_nat_types() {

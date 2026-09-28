@@ -29,7 +29,7 @@ pub struct Report {
     pub nat: stun::NatResult,
 }
 
-async fn endpoint(provider: Option<&str>) -> Result<(String, u16)> {
+async fn endpoint(provider: Option<&str>) -> Result<config::ProbeEndpoint> {
     let runtime = Config::runtime().await;
     let snapshot = runtime.latest_arc();
     config::endpoint(snapshot.config.as_ref().context("no active runtime")?, provider)
@@ -42,14 +42,22 @@ pub async fn check(name: &str, provider: Option<&str>, timeout_ms: u64, udp: boo
         endpoint(provider).await? == expected,
         "profile changed while waiting for detection"
     );
-    let (group, port) = &expected;
+    let config::ProbeEndpoint {
+        group,
+        port,
+        credentials,
+    } = &expected;
     let mihomo = Handle::mihomo();
     close_probe_connections(group).await?;
     mihomo.select_node_for_group(group, name).await?;
     let duration = Duration::from_millis(timeout_ms.clamp(3000, 30000));
+    let mut proxy = Proxy::all(format!("http://127.0.0.1:{port}"))?;
+    if let Some((username, password)) = credentials {
+        proxy = proxy.basic_auth(username, password);
+    }
     let client = Client::builder()
         .no_proxy()
-        .proxy(Proxy::all(format!("http://127.0.0.1:{port}"))?)
+        .proxy(proxy)
         .timeout(duration)
         .connect_timeout(duration)
         .redirect(reqwest::redirect::Policy::none())
@@ -81,7 +89,7 @@ pub async fn check(name: &str, provider: Option<&str>, timeout_ms: u64, udp: boo
         }
     }
     let nat = if udp {
-        match stun::check(*port, timeout_ms).await {
+        match stun::check(*port, timeout_ms, credentials.as_ref()).await {
             Ok(result) => result,
             Err(error) => stun::NatResult::unknown(&format!("{error:#}")),
         }
