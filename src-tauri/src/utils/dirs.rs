@@ -24,8 +24,20 @@ pub static PROFILE_YAML: &str = "profiles.yaml";
 /// Marks that the one-shot raise of too-short auto-update intervals has already run.
 pub static UPDATE_INTERVAL_MIGRATED: &str = ".update-interval-migrated";
 
-/// Uses the same platform data resolver as Tauri, including before its handle exists.
+/// ZIP builds carry a PORTABLE marker beside the executable and keep data there.
+/// Resolve this before Tauri starts too, so startup logs and instance records agree.
 pub fn app_home_dir() -> Result<PathBuf> {
+    #[cfg(windows)]
+    {
+        let exe = std::env::current_exe()?;
+        let root = exe
+            .parent()
+            .ok_or_else(|| anyhow::anyhow!("Failed to get the executable directory"))?;
+        if root.join("PORTABLE").is_file() {
+            return Ok(root.to_path_buf());
+        }
+    }
+
     ::dirs::data_dir()
         .map(|root| root.join(APP_ID))
         .ok_or_else(|| anyhow::anyhow!("Failed to get the app home directory"))

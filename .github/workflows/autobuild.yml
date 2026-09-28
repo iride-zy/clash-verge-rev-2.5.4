@@ -235,6 +235,19 @@ jobs:
           tauriScript: pnpm
           args: --target ${{ matrix.target }}
 
+      - name: Package Windows ZIP
+        if: matrix.os == 'windows-latest'
+        run: pnpm portable ${{ matrix.target }}
+
+      - name: Upload Windows ZIP
+        if: matrix.os == 'windows-latest'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: pwsh
+        run: |
+          $files = Get-ChildItem "target/${{ matrix.target }}/release/bundle/portable/*.zip" | Select-Object -ExpandProperty FullName
+          gh release upload "$env:TAG_NAME" $files --clobber
+
   autobuild-arm-linux:
     name: Autobuild ARM Linux
     needs: [check_commit, update_tag]

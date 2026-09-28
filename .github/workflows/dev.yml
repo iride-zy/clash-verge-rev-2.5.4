@@ -157,12 +157,18 @@ jobs:
           path: target/${{ matrix.target }}/release/bundle/dmg/*.dmg
           if-no-files-found: error
 
+      - name: Package Windows ZIP
+        if: matrix.os == 'windows-latest' && github.event.inputs[matrix.input] == 'true'
+        run: pnpm portable ${{ matrix.target }}
+
       - name: Upload Artifacts (Windows)
         if: matrix.os == 'windows-latest' && github.event.inputs[matrix.input] == 'true'
         uses: actions/upload-artifact@v7
         with:
           archive: false
-          path: target/${{ matrix.target }}/release/bundle/nsis/*.exe
+          path: |
+            target/${{ matrix.target }}/release/bundle/nsis/*.exe
+            target/${{ matrix.target }}/release/bundle/portable/*.zip
           if-no-files-found: error
 
       - name: Upload Artifacts (Linux)
