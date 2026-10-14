@@ -3,14 +3,14 @@ import { checkUpdateSafe } from '@/services/update'
 
 const LAST_CHECK_KEY = 'last_check_update'
 
-export const readLastCheckTime = (): number | null => {
+const readLastCheckTime = (): number | null => {
   const stored = localStorage.getItem(LAST_CHECK_KEY)
   if (!stored) return null
   const ts = parseInt(stored, 10)
   return isNaN(ts) ? null : ts
 }
 
-export const updateLastCheckTime = (timestamp?: number): number => {
+const updateLastCheckTime = (timestamp?: number): number => {
   const now = timestamp ?? Date.now()
   localStorage.setItem(LAST_CHECK_KEY, now.toString())
   setCacheData([LAST_CHECK_KEY], now)
@@ -18,8 +18,6 @@ export const updateLastCheckTime = (timestamp?: number): number => {
 }
 
 export const useUpdate = (_enabled: boolean = true) => {
-  const shouldCheck = false
-
   const fetchUpdate = async () => {
     const result = await checkUpdateSafe()
     updateLastCheckTime()
@@ -29,12 +27,14 @@ export const useUpdate = (_enabled: boolean = true) => {
   const { data: updateInfo, isFetching: isValidating } = useQuery({
     queryKey: ['checkUpdate'],
     queryFn: fetchUpdate,
-    enabled: shouldCheck,
-    retry: 2,
+    // Subscribe to manual results without scheduling an application update check.
+    revalidateOnMount: false,
+    retry: false,
     staleTime: 60 * 60 * 1000,
-    refetchInterval: Number.POSITIVE_INFINITY,
+    refetchInterval: false,
     refetchIntervalInBackground: false,
     refetchOnWindowFocus: false,
+    refetchOnReconnect: false,
   })
 
   const checkUpdate = async () => {

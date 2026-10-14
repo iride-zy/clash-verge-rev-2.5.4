@@ -127,11 +127,11 @@ jobs:
           #### 正常版本(推荐)
           - [64位(常用)](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_x64-setup.exe) | [ARM64(不常用)](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_arm64-setup.exe)
 
+          #### ZIP 版本
+          - [64位 ZIP](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_x64_portable.zip) | [ARM64 ZIP](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_arm64_portable.zip)
+
           #### 内置Webview2版(体积较大，仅在企业版系统或无法安装webview2时使用)
           - [64位](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_x64_fixed_webview2-setup.exe) | [ARM64](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_arm64_fixed_webview2-setup.exe)
-
-          ### macOS
-          - [Apple M芯片](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_aarch64.dmg) | [Intel芯片](${{ env.DOWNLOAD_URL }}/Clash.Verge_${{ env.VERSION }}_x64.dmg)
 
           ### Linux
           #### DEB包(Debian系) 使用 apt ./路径 安装
@@ -144,7 +144,7 @@ jobs:
           - [常见问题](https://clash-verge-rev.github.io/faq/windows.html)
 
           ### 稳定机场VPN推荐
-          - [狗狗加速](https://verge.dginv.click/#/register?code=oaxsAGo6)
+          - [狗狗加速](https://cvr.dginv.click/#/register?code=oaxsAGo6)
 
           Created at ${{ env.BUILDTIME }}.
           EOF
@@ -205,7 +205,7 @@ jobs:
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.98.1'
+          toolchain: '1.99.0'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -245,7 +245,7 @@ jobs:
 
       - name: Add Rust Target
         run: |
-          rustup target add ${{ matrix.target }} --toolchain 1.98.1 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.99.0 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
@@ -325,7 +325,7 @@ jobs:
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.98.1'
+          toolchain: '1.99.0'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -403,7 +403,7 @@ jobs:
 
       - name: Add Rust Target
         run: |
-          rustup target add ${{ matrix.target }} --toolchain 1.98.1 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.99.0 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 
@@ -458,7 +458,7 @@ jobs:
       - name: Install Rust Stable
         uses: dtolnay/rust-toolchain@master
         with:
-          toolchain: '1.98.1'
+          toolchain: '1.99.0'
           targets: ${{ matrix.target }}
 
       - name: Add Rust Target
@@ -499,7 +499,7 @@ jobs:
 
       - name: Add Rust Target
         run: |
-          rustup target add ${{ matrix.target }} --toolchain 1.98.1 || rustup target add ${{ matrix.target }}
+          rustup target add ${{ matrix.target }} --toolchain 1.99.0 || rustup target add ${{ matrix.target }}
           rustup target list --installed
           echo "Rust target ${{ matrix.target }} installed."
 

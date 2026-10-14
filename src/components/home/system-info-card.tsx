@@ -14,11 +14,7 @@ import { useNavigate } from 'react-router'
 
 import { useServiceInstaller } from '@/hooks/use-service-installer'
 import { useSystemState } from '@/hooks/use-system-state'
-import {
-  useUpdate,
-  updateLastCheckTime,
-  readLastCheckTime,
-} from '@/hooks/use-update'
+import { useUpdate } from '@/hooks/use-update'
 import { useVerge } from '@/hooks/use-verge'
 import { getSystemInfo } from '@/services/cmds'
 import { showNotice } from '@/services/notice-service'
@@ -60,17 +56,6 @@ export const SystemInfoCard = () => {
       })
       .catch(console.error)
   }, [])
-
-  useEffect(() => {
-    if (!verge?.auto_check_update) return
-    if (readLastCheckTime() !== null) return
-
-    updateLastCheckTime()
-    const timeoutId = window.setTimeout(() => {
-      triggerCheckUpdate().catch(console.error)
-    }, 5000)
-    return () => window.clearTimeout(timeoutId)
-  }, [verge?.auto_check_update, triggerCheckUpdate])
 
   const goToSettings = useCallback(() => {
     navigate('/settings')

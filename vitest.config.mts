@@ -16,5 +16,10 @@ export default defineConfig({
     include: ['tests/**/*.test.ts', 'src/**/*.test.ts'],
     environment: 'node',
     restoreMocks: true,
+    server: {
+      deps: {
+        inline: ['swr', 'use-sync-external-store'],
+      },
+    },
   },
 })

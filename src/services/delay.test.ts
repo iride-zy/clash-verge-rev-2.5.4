@@ -90,14 +90,315 @@ describe('proxy test types', () => {
 
     expect(delayProxyByName).toHaveBeenCalledTimes(1)
     expect(checkNodeDiagnostics).toHaveBeenCalledTimes(1)
-    const update = delayManager.getDelayUpdate('status-node', 'g')
+    const update = delayManager.getDelayUpdate(member, 'g')
     expect(update?.delay).toBe(120)
     expect(update?.diagnostics?.status).toBe('done')
 
     await delayManager.checkDelay(member as never, 'g', 5000)
     expect(checkNodeDiagnostics).toHaveBeenCalledTimes(1)
-    expect(
-      delayManager.getDelayUpdate('status-node', 'g')?.diagnostics,
-    ).toEqual(update?.diagnostics)
+    expect(delayManager.getDelayUpdate(member, 'g')?.diagnostics).toEqual(
+      update?.diagnostics,
+    )
   })
+
+  test('newer core latency history retains network diagnostics', async () => {
+    const member = node('status-history')
+    if (member.kind !== 'node') throw new Error('Expected node')
+    await delayManager.checkListDelay(
+      [member],
+      'status-history-group',
+      5000,
+      2,
+      'status',
+    )
+    const update = delayManager.getDelayUpdate(member, 'status-history-group')
+    expect(update?.diagnostics?.status).toBe('done')
+    member.node.extra = {
+      [delayManager.getUrl('status-history-group')]: {
+        alive: true,
+        history: [
+          { time: new Date(update!.updatedAt + 1000).toISOString(), delay: 42 },
+        ],
+      },
+    }
+
+    expect(delayManager.getDelayUpdate(member, 'status-history-group')).toEqual(
+      expect.objectContaining({ delay: 42, diagnostics: update?.diagnostics }),
+    )
+  })
+
+  test('a diagnostics generation change rejects an old in-flight result', async () => {
+    const member = node('status-generation')
+    const report = {
+      entry: { ip: '192.0.2.1', location: 'entry', error: null },
+      exit: { ip: '198.51.100.1', location: 'exit', error: null },
+      nat: { kind: 'unknown' as const, mappedAddress: null, detail: null },
+    }
+    let finish!: (value: typeof report) => void
+    vi.mocked(checkNodeDiagnostics).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    delayManager.setDiagnosticsGeneration('before-reload')
+    const pending = delayManager.checkListDelay(
+      [member] as never,
+      'status-generation-group',
+      5000,
+      2,
+      'status',
+    )
+    expect(checkNodeDiagnostics).toHaveBeenCalledOnce()
+    delayManager.setDiagnosticsGeneration('after-reload')
+    finish(report)
+    await pending
+
+    expect(
+      delayManager.getDelayUpdate(member, 'status-generation-group')?.delay,
+    ).toBe(120)
+    expect(
+      delayManager.getDelayUpdate(member, 'status-generation-group')
+        ?.diagnostics,
+    ).toBeUndefined()
+  })
+})
+
+test('a late status reply cannot leave a different URL testing', async () => {
+  const member = node('status-url-change')
+  const group = 'status-url-change-group'
+  const report = {
+    entry: { ip: '192.0.2.1', location: 'entry', error: null },
+    exit: { ip: '198.51.100.1', location: 'exit', error: null },
+    nat: { kind: 'unknown' as const, mappedAddress: null, detail: null },
+  }
+  let finish!: (value: typeof report) => void
+  vi.mocked(checkNodeDiagnostics).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  delayManager.setUrl(group, 'http://localhost/a')
+  const pending = delayManager.checkListDelay(
+    [member] as never,
+    group,
+    5000,
+    2,
+    'status',
+  )
+  delayManager.setUrl(group, 'http://localhost/b')
+  finish(report)
+  await pending
+
+  expect(delayManager.getDelayFix(member, group)).toBe(-1)
+  expect(delayManager.getDelayUpdate(member, group)).toBeUndefined()
+})
+
+test('a new URL runs its own status measurement while the old URL is pending', async () => {
+  const member = node('status-url-concurrency')
+  const group = 'status-url-concurrency-group'
+  const report = {
+    entry: { ip: null, location: null, error: null },
+    exit: { ip: null, location: null, error: null },
+    nat: { kind: 'unknown' as const, mappedAddress: null, detail: null },
+  }
+  let finish!: (value: typeof report) => void
+  vi.mocked(checkNodeDiagnostics).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  delayManager.setUrl(group, 'http://localhost/a')
+  const old = delayManager.checkListDelay(
+    [member] as never,
+    group,
+    5000,
+    2,
+    'status',
+  )
+  delayManager.setUrl(group, 'http://localhost/b')
+  await delayManager.checkListDelay([member] as never, group, 5000, 2, 'status')
+  expect(delayProxyByName).toHaveBeenCalledTimes(2)
+  expect(checkNodeDiagnostics).toHaveBeenCalledTimes(2)
+  const current = delayManager.getDelayUpdate(member, group)
+  expect(current?.delay).toBe(120)
+  expect(current?.diagnostics?.status).toBe('done')
+
+  finish(report)
+  await old
+  expect(delayManager.getDelayUpdate(member, group)).toEqual(current)
+})
+
+test('a delay-only check for a new URL cannot inherit an old pending diagnostic', async () => {
+  const member = node('status-url-delay-only')
+  const group = 'status-url-delay-only-group'
+  const report = {
+    entry: { ip: null, location: null, error: null },
+    exit: { ip: null, location: null, error: null },
+    nat: { kind: 'unknown' as const, mappedAddress: null, detail: null },
+  }
+  let finish!: (value: typeof report) => void
+  vi.mocked(checkNodeDiagnostics).mockImplementationOnce(
+    () =>
+      new Promise((resolve) => {
+        finish = resolve
+      }),
+  )
+  delayManager.setUrl(group, 'http://localhost/a')
+  const old = delayManager.checkListDelay(
+    [member] as never,
+    group,
+    5000,
+    2,
+    'status',
+  )
+  delayManager.setUrl(group, 'http://localhost/b')
+  await delayManager.checkDelay(member as never, group, 5000)
+  expect(checkNodeDiagnostics).toHaveBeenCalledOnce()
+  const current = delayManager.getDelayUpdate(member, group)
+  expect(current?.delay).toBe(120)
+  expect(current?.diagnostics).toBeUndefined()
+
+  finish(report)
+  await old
+  expect(delayManager.getDelayUpdate(member, group)).toEqual(current)
+})
+
+test('uses newer core history after a tray test without hiding an active page test', () => {
+  const member = node('tray-refresh')
+  if (member.kind !== 'node') throw new Error('Expected node')
+  const cached = delayManager.setDelay(member, 'tray-group', 50)
+  member.node.extra = {
+    [delayManager.getUrl('tray-group')]: {
+      alive: true,
+      history: [
+        { time: new Date(cached.updatedAt + 1000).toISOString(), delay: 300 },
+      ],
+    },
+  }
+
+  expect(delayManager.getDelayFix(member, 'tray-group')).toBe(300)
+  expect(delayManager.getDelayUpdate(member, 'tray-group')?.delay).toBe(300)
+
+  delayManager.setDelay(member, 'tray-group', -2)
+  expect(delayManager.getDelayFix(member, 'tray-group')).toBe(-2)
+})
+
+test('latency URL validation rejects malformed hosts and ports and trims valid URLs', () => {
+  for (const url of [
+    'http://?',
+    'http://host:invalid',
+    'http://bad host/',
+    'ftp://localhost',
+    'http:localhost',
+  ]) {
+    delayManager.setUrl('url-validation', url)
+    expect(delayManager.getUrl('url-validation')).toBe(
+      'http://cp.cloudflare.com/generate_204',
+    )
+  }
+  delayManager.setUrl('url-validation', ' HTTP://localhost:8080/ ')
+  expect(delayManager.getUrl('url-validation')).toBe('HTTP://localhost:8080/')
+})
+
+test('another URL cannot replace a group measurement, but a newer matching URL can', () => {
+  const member = node('url-isolation')
+  if (member.kind !== 'node') throw new Error('Expected node')
+  delayManager.setUrl('url-a', 'http://localhost/a')
+  const cached = delayManager.setDelay(member, 'url-a', 50)
+  const newer = new Date(cached.updatedAt + 1000).toISOString()
+  Object.assign(member.node, {
+    history: [{ time: newer, delay: 126 }],
+    extra: {
+      'http://localhost/a': {
+        alive: true,
+        history: [
+          { time: new Date(cached.updatedAt - 1000).toISOString(), delay: 49 },
+        ],
+      },
+      'http://localhost/b': {
+        alive: true,
+        history: [{ time: newer, delay: 126 }],
+      },
+    },
+  })
+  expect(delayManager.getDelayFix(member, 'url-a')).toBe(50)
+  Object.assign(member.node, {
+    extra: {
+      'http://localhost/a': {
+        alive: true,
+        history: [{ time: newer, delay: 75 }],
+      },
+    },
+  })
+  expect(delayManager.getDelayFix(member, 'url-a')).toBe(75)
+})
+
+test('same-named provider members keep separate measurements and listeners', async () => {
+  const first = node('same-provider-name')
+  const second = node('same-provider-name')
+  if (first.kind !== 'node' || second.kind !== 'node')
+    throw new Error('Expected nodes')
+  first.node.recordId = 'provider-a:N'
+  first.node.source = { kind: 'provider', providerName: 'a', proxyName: 'N' }
+  second.node.recordId = 'provider-b:N'
+  second.node.source = { kind: 'provider', providerName: 'b', proxyName: 'N' }
+  const { healthcheckNodeInProvider } = await import('tauri-plugin-mihomo-api')
+  vi.mocked(healthcheckNodeInProvider)
+    .mockResolvedValueOnce({ delay: 40 })
+    .mockResolvedValueOnce({ delay: 125 })
+  const firstListener = vi.fn()
+  const secondListener = vi.fn()
+  delayManager.setListener(first, 'provider-collision', firstListener)
+  delayManager.setListener(second, 'provider-collision', secondListener)
+  await delayManager.checkListDelay([first, second], 'provider-collision', 5000)
+  await flush()
+  expect(firstListener).toHaveBeenLastCalledWith(
+    expect.objectContaining({ delay: 40 }),
+  )
+  expect(secondListener).toHaveBeenLastCalledWith(
+    expect.objectContaining({ delay: 125 }),
+  )
+  delayManager.removeListener(first, 'provider-collision')
+  delayManager.removeListener(second, 'provider-collision')
+  expect(delayManager.getDelayFix(first, 'provider-collision')).toBe(40)
+  expect(delayManager.getDelayFix(second, 'provider-collision')).toBe(125)
+})
+
+test.each(['core', 'provider'] as const)(
+  'cached %s delays follow source identity after record IDs move',
+  (kind) => {
+    const original = node(`stable-${kind}`)
+    const replacement = node(`replacement-${kind}`)
+    if (original.kind !== 'node' || replacement.kind !== 'node')
+      throw new Error('Expected nodes')
+    const source = (proxyName: string) =>
+      kind === 'core'
+        ? { kind, proxyName }
+        : { kind, providerName: 'subscription', proxyName }
+    original.node.source = source(original.ref.name)
+    replacement.node.source = source(replacement.ref.name)
+    original.node.recordId = 'position:0'
+    replacement.node.recordId = 'position:0'
+    delayManager.setDelay(original, `reorder-${kind}`, 40)
+    expect(delayManager.getDelayFix(replacement, `reorder-${kind}`)).toBe(-1)
+    original.node.recordId = 'position:1'
+    expect(delayManager.getDelayFix(original, `reorder-${kind}`)).toBe(40)
+  },
+)
+
+test('unmeasured selectors show automatic history without replacing a manual URL result', () => {
+  const member = node('selector-member')
+  if (member.kind !== 'node') throw new Error('Expected node')
+  member.node.history = [
+    { time: new Date(Date.now() + 1000).toISOString(), delay: 126 },
+  ]
+  member.node.extra = {
+    'http://localhost/automatic': { alive: true, history: member.node.history },
+  }
+  expect(delayManager.getDelayFix(member, 'selector')).toBe(126)
+  delayManager.setDelay(member, 'selector', 50)
+  expect(delayManager.getDelayFix(member, 'selector')).toBe(50)
 })

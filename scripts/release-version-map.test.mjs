@@ -16,7 +16,11 @@ test('fork revisions round-trip between release tags and application versions', 
 })
 
 test('ordinary versions and rolling release tags keep their existing behavior', () => {
-  for (const version of ['2.5.5', '2.5.5-rc.1', '2.5.5+autobuild.0928.abcdef']) {
+  for (const version of [
+    '2.5.5',
+    '2.5.5-rc.1',
+    '2.5.5+autobuild.0928.abcdef',
+  ]) {
     assert.equal(releaseTagForVersion(version), `v${version}`)
     assert.equal(updaterVersionForTag(`v${version}`), `v${version}`)
   }
