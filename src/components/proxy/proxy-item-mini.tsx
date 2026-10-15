@@ -53,7 +53,7 @@ export const ProxyItemMini = (props: Props) => {
         },
         ({ palette: { mode, primary } }) => {
           const bgcolor = mode === 'light' ? '#ffffff' : '#24252f'
-          const showDelay = delayValue > 0
+          const showDelay = delayValue >= 0
           const selectColor = mode === 'light' ? primary.main : primary.light
 
           return {

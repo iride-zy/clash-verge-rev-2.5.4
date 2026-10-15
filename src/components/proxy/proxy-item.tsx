@@ -75,7 +75,7 @@ export const ProxyItem = (props: Props) => {
           ({ palette: { mode, primary } }) => {
             const bgcolor = mode === 'light' ? '#ffffff' : '#24252f'
             const selectColor = mode === 'light' ? primary.main : primary.light
-            const showDelay = delayValue > 0
+            const showDelay = delayValue >= 0
 
             return {
               '&:hover .the-check': { display: !showDelay ? 'block' : 'none' },
@@ -166,7 +166,7 @@ export const ProxyItem = (props: Props) => {
             </Widget>
           )}
 
-          {!unresolved && delayValue > 0 && (
+          {!unresolved && delayValue >= 0 && (
             // 显示延迟
             <Widget
               className="the-delay"
@@ -184,7 +184,7 @@ export const ProxyItem = (props: Props) => {
             </Widget>
           )}
 
-          {!unresolved && delayValue !== -2 && delayValue <= 0 && selected && (
+          {!unresolved && delayValue !== -2 && delayValue < 0 && selected && (
             // 展示已选择的 icon
             <CheckCircleOutlineRounded
               className="the-icon"

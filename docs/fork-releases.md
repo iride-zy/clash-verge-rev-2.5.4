@@ -7,9 +7,10 @@ version valid for Cargo and Tauri:
 | --- | --- |
 | `2.5.5+1` | `v2.5.5.1` |
 | `2.5.5+2` | `v2.5.5.2` |
+| `2.5.8+2` | `v2.5.8.2` |
 
-Run `pnpm release-version 2.5.5+2`, commit the version files on `main`, push
-`main`, then create and push `v2.5.5.2`. Pushing the tag starts Release Build.
+Run `pnpm release-version 2.5.8+2`, commit the version files and changelog on
+`main`, push `main`, then create and push `v2.5.8.2`. Pushing the tag starts Release Build.
 The release tag must point to the commit containing the matching version files.
 
 Release titles and URLs use the Git tag. Installer filenames use the application

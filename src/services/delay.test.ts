@@ -1,4 +1,7 @@
-import { delayProxyByName } from 'tauri-plugin-mihomo-api'
+import {
+  delayProxyByName,
+  healthcheckNodeInProvider,
+} from 'tauri-plugin-mihomo-api'
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 
 vi.mock('tauri-plugin-mihomo-api', () => ({
@@ -14,7 +17,11 @@ vi.mock('./node-diagnostics', () => ({
   })),
 }))
 
-import type { ResolvedProxyMember } from '@/types/proxy-view'
+import type {
+  InteractableProxyMember,
+  ProxyGroupView,
+  ResolvedProxyMember,
+} from '@/types/proxy-view'
 
 import delayManager from './delay'
 import { checkNodeDiagnostics } from './node-diagnostics'
@@ -127,7 +134,7 @@ describe('proxy test types', () => {
     )
   })
 
-  test('a diagnostics generation change rejects an old in-flight result', async () => {
+  test('a generation change rejects old latency and diagnostics replies', async () => {
     const member = node('status-generation')
     const report = {
       entry: { ip: '192.0.2.1', location: 'entry', error: null },
@@ -154,9 +161,7 @@ describe('proxy test types', () => {
     finish(report)
     await pending
 
-    expect(
-      delayManager.getDelayUpdate(member, 'status-generation-group')?.delay,
-    ).toBe(120)
+    expect(delayManager.getDelayFix(member, 'status-generation-group')).toBe(-1)
     expect(
       delayManager.getDelayUpdate(member, 'status-generation-group')
         ?.diagnostics,
@@ -401,4 +406,172 @@ test('unmeasured selectors show automatic history without replacing a manual URL
   expect(delayManager.getDelayFix(member, 'selector')).toBe(126)
   delayManager.setDelay(member, 'selector', 50)
   expect(delayManager.getDelayFix(member, 'selector')).toBe(50)
+})
+
+test('GLOBAL measures group routes and provider nodes through their own APIs', async () => {
+  const group: InteractableProxyMember = {
+    kind: 'group',
+    ref: { kind: 'group', name: 'Auto Select' },
+    group: {
+      name: 'Auto Select',
+      now: 'first',
+      history: [],
+    } as unknown as ProxyGroupView,
+  }
+  const provider = node('display-name')
+  if (provider.kind !== 'node') throw new Error('Expected node')
+  provider.node.source = {
+    kind: 'provider',
+    providerName: 'subscription',
+    proxyName: 'provider-node',
+  }
+  delayManager.setUrl('GLOBAL', 'http://localhost/global-test')
+  try {
+    await delayManager.checkListDelay([group, provider], 'GLOBAL', 5000)
+
+    expect(delayProxyByName).toHaveBeenCalledWith(
+      'Auto Select',
+      'http://localhost/global-test',
+      5000,
+    )
+    expect(healthcheckNodeInProvider).toHaveBeenCalledWith(
+      'subscription',
+      'provider-node',
+      'http://localhost/global-test',
+      5000,
+    )
+    expect(delayManager.getDelayFix(group, 'GLOBAL')).toBe(120)
+    expect(delayManager.getDelayFix(provider, 'GLOBAL')).toBe(120)
+  } finally {
+    delayManager.setUrl('GLOBAL', '')
+  }
+})
+
+test('GLOBAL manual group latency stays bound to its selected node', () => {
+  const member: InteractableProxyMember = {
+    kind: 'group',
+    ref: { kind: 'group', name: 'global-selector' },
+    group: { now: 'first', history: [] } as unknown as ProxyGroupView,
+  }
+  delayManager.setDelay(member, 'GLOBAL', 50)
+  const changed: InteractableProxyMember = {
+    ...member,
+    group: { ...member.group, now: 'second' },
+  }
+
+  expect(delayManager.getDelayFix(changed, 'GLOBAL')).toBe(-1)
+  expect(delayManager.getDelayFix(member, 'GLOBAL')).toBe(50)
+})
+
+test('group snapshots keep complete names containing spaces', () => {
+  const names = ['Auto Select', 'Hong Kong 01', 'GLOBAL']
+  const key = JSON.stringify(names)
+  const snapshots = delayManager.groupsDelays(key)
+
+  expect([...snapshots.keys()]).toEqual(names)
+  expect(delayManager.groupsDelays(key)).toBe(snapshots)
+  delayManager.setUrl('Auto Select', 'http://localhost/snapshot-test')
+  const changed = delayManager.groupsDelays(key)
+  expect(changed).not.toBe(snapshots)
+  expect(changed.get('Auto Select')).not.toBe(snapshots.get('Auto Select'))
+  expect(changed.get('GLOBAL')).toBe(snapshots.get('GLOBAL'))
+})
+
+test('duplicate occurrences receive updates and unsubscribe independently', async () => {
+  const member = node('duplicate-occurrence')
+  const first = vi.fn()
+  const second = vi.fn()
+  const stopFirst = delayManager.setListener(member, 'duplicates', first)
+  const stopSecond = delayManager.setListener(member, 'duplicates', second)
+  try {
+    delayManager.setDelay(member, 'duplicates', 50)
+    await flush()
+    expect(first).toHaveBeenLastCalledWith(
+      expect.objectContaining({ delay: 50 }),
+    )
+    expect(second).toHaveBeenLastCalledWith(
+      expect.objectContaining({ delay: 50 }),
+    )
+
+    stopFirst()
+    delayManager.setDelay(member, 'duplicates', 75)
+    await flush()
+    expect(first).toHaveBeenCalledTimes(1)
+    expect(second).toHaveBeenLastCalledWith(
+      expect.objectContaining({ delay: 75 }),
+    )
+  } finally {
+    stopFirst()
+    stopSecond()
+  }
+})
+
+test.each([
+  ['profile', 1],
+  ['profile', 2],
+  ['URL', 1],
+  ['URL', 2],
+] as const)(
+  'cancels queued status work after a %s change with %i workers',
+  async (change, concurrency) => {
+    const group = `queued-${change}-${concurrency}`
+    const first = node(`${group}-active`)
+    const queued = node(`${group}-queued`)
+    const report = {
+      entry: { ip: null, location: null, error: null },
+      exit: { ip: null, location: null, error: null },
+      nat: { kind: 'unknown' as const, mappedAddress: null, detail: null },
+    }
+    let finish!: (value: typeof report) => void
+    vi.spyOn(Math, 'random').mockReturnValue(1)
+    vi.mocked(checkNodeDiagnostics).mockImplementationOnce(
+      () =>
+        new Promise((resolve) => {
+          finish = resolve
+        }),
+    )
+    delayManager.setDiagnosticsGeneration(`${group}-before`)
+    delayManager.setUrl(group, 'http://localhost/queued-a')
+    delayManager.setDelay(queued, group, 75)
+    const pending = delayManager.checkListDelay(
+      [first, queued] as never,
+      group,
+      5000,
+      concurrency,
+      'status',
+    )
+
+    if (change === 'profile') {
+      delayManager.setDiagnosticsGeneration(`${group}-after`)
+    } else {
+      delayManager.setUrl(group, 'http://localhost/queued-b')
+      delayManager.setUrl(group, 'http://localhost/queued-a')
+    }
+    finish(report)
+    await pending
+
+    expect(checkNodeDiagnostics).toHaveBeenCalledOnce()
+    expect(delayProxyByName).toHaveBeenCalledOnce()
+    expect(delayManager.getDelayFix(queued, group)).not.toBe(-2)
+    expect(
+      delayManager.getDelayUpdate(queued, group)?.diagnostics,
+    ).toBeUndefined()
+  },
+)
+
+test('listener cleanup retains its original group route after a selection changes', async () => {
+  const member: InteractableProxyMember = {
+    kind: 'group',
+    ref: { kind: 'group', name: 'mutable-selection' },
+    group: { now: 'first', history: [] } as unknown as ProxyGroupView,
+  }
+  const originalRoute = { ...member, group: { ...member.group } }
+  const listener = vi.fn()
+  const stop = delayManager.setListener(member, 'GLOBAL', listener)
+  member.group.now = 'second'
+  stop()
+  delayManager.setDelay(originalRoute, 'GLOBAL', 75)
+  await flush()
+
+  expect(listener).not.toHaveBeenCalled()
 })

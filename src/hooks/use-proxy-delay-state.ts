@@ -42,10 +42,7 @@ export function useProxyDelayState(
 
   useEffect(() => {
     if (isPreset) return
-    delayManager.setListener(member, groupName, setDelayState)
-    return () => {
-      delayManager.removeListener(member, groupName)
-    }
+    return delayManager.setListener(member, groupName, setDelayState)
   }, [member, groupName, isPreset])
 
   const updateDelay = useCallback(() => {

@@ -65,8 +65,13 @@ history must retain its diagnostic result, and profile-generation or test-URL
 changes must reject stale diagnostic replies. Different URLs must not share
 in-flight status measurements or inherit each other's diagnostic state. Keep
 both upstream and fork regression tests.
-The v2.5.8 fork release uses `2.5.8+1` in all four internal version fields and
-the public release tag `v2.5.8.1`.
+Status results have an independent, generation- and URL-scoped persistent cache
+so latency expiry and lightweight-mode WebView recreation do not erase them.
+Diagnostics own each private inlet through cleanup; TCP and UDP run concurrently
+within it, and independent provider inlets may run in parallel. Preserve those
+boundaries when changing test scheduling.
+The current v2.5.8 fork revision uses `2.5.8+2` in all four internal version
+fields and the public release tag `v2.5.8.2`.
 
 
 # add
@@ -76,13 +81,13 @@ git remote add upstream https://github.com/clash-verge-rev/clash-verge-rev.git
 # release
 
 ## 同步四处内部版本号
-pnpm release-version 2.5.8+1
+pnpm release-version 2.5.8+2
 
 ## 提交并推送
 git add package.json src-tauri/Cargo.toml Cargo.lock src-tauri/tauri.conf.json
-git commit -m "chore(release): 2.5.8+1"
+git commit -m "chore(release): 2.5.8+2"
 git push origin main
 
 ## 创建独立发布，触发 Release Build
-git tag v2.5.8.1
-git push origin v2.5.8.1
+git tag v2.5.8.2
+git push origin v2.5.8.2

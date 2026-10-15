@@ -58,6 +58,13 @@ struct Binding {
     other: Option<SocketAddr>,
 }
 
+struct Candidate {
+    result: NatResult,
+    // A full set of observations can still be estimated: negative filtering tests
+    // never prove that packet loss or the public server did not affect the result.
+    complete: bool,
+}
+
 fn address(bytes: &[u8], xor: bool, transaction: &[u8; 12]) -> Result<SocketAddr> {
     ensure!(bytes.len() >= 4, "truncated STUN address");
     let mut port = u16::from_be_bytes([bytes[2], bytes[3]]);
@@ -316,20 +323,27 @@ pub async fn check(port: u16, timeout_ms: u64, credentials: Option<&(String, Str
         let credentials = credentials.cloned();
         probes.spawn(async move { (server, check_server(port, server, credentials.as_ref()).await) });
     }
+    Ok(collect_results(probes, deadline).await)
+}
+
+async fn collect_results(mut probes: JoinSet<(&'static str, Result<Candidate>)>, deadline: Instant) -> NatResult {
     let mut best = NatResult::unknown("No usable STUN observations");
     let mut attempts = Vec::new();
     while !probes.is_empty() {
         match timeout_at(deadline, probes.join_next()).await {
-            Ok(Some(Ok((server, Ok(mut result))))) => {
+            Ok(Some(Ok((server, Ok(Candidate { mut result, complete }))))) => {
                 attempts.push(format!("{server}: {}", result.detail.as_deref().unwrap_or(result.kind)));
                 result.detail = Some(format!(
                     "STUN {server}:3478. {}",
                     result.detail.as_deref().unwrap_or_default(),
                 ));
-                if result_rank(&result) > result_rank(&best) {
+                if complete || result_rank(&result) > result_rank(&best) {
                     best = result;
                 }
-                if result_rank(&best) == 3 {
+                // Do not wait for an unreachable candidate once another has completed
+                // filtering, alternate mapping and stable baseline checks. Keep the
+                // conservative estimated flag on timeout-based classifications.
+                if complete || result_rank(&best) == 3 {
                     break;
                 }
             }
@@ -352,7 +366,7 @@ pub async fn check(port: u16, timeout_ms: u64, credentials: Option<&(String, Str
             attempts.join("\n"),
         ));
     }
-    Ok(best)
+    best
 }
 
 async fn authenticate(control: &mut TcpStream, credentials: Option<&(String, String)>) -> Result<()> {
@@ -382,7 +396,7 @@ async fn authenticate(control: &mut TcpStream, credentials: Option<&(String, Str
     }
 }
 
-async fn check_server(port: u16, server: &str, credentials: Option<&(String, String)>) -> Result<NatResult> {
+async fn check_server(port: u16, server: &str, credentials: Option<&(String, String)>) -> Result<Candidate> {
     let mut control = TcpStream::connect((Ipv4Addr::LOCALHOST, port)).await?;
     authenticate(&mut control, credentials).await?;
     let socket = UdpSocket::bind((Ipv4Addr::LOCALHOST, 0)).await?;
@@ -420,7 +434,7 @@ async fn check_server(port: u16, server: &str, credentials: Option<&(String, Str
         .filter(|a| a.ip() != primary.ip() && a.port() != primary.port() && !a.ip().is_loopback())
     else {
         result.detail = Some("STUN server did not advertise RFC 5780 alternate addresses".into());
-        return Ok(result);
+        return Ok(Candidate { result, complete: false });
     };
     let primary_target = socks_address(primary);
     // Filtering must run before contacting the alternate endpoint, which would open a pinhole.
@@ -467,6 +481,10 @@ async fn check_server(port: u16, server: &str, credentials: Option<&(String, Str
         "Baseline recheck",
         &mut notes,
     );
+    let complete = filtering.is_some()
+        && alternate.is_some()
+        && baseline.as_ref().is_some_and(|binding| binding.mapped == first.mapped)
+        && !used_alternate_port_fallback;
     result = classify(
         first.mapped,
         filtering,
@@ -485,7 +503,7 @@ async fn check_server(port: u16, server: &str, credentials: Option<&(String, Str
         ));
     }
     drop(control);
-    Ok(result)
+    Ok(Candidate { result, complete })
 }
 
 #[cfg(test)]
@@ -584,6 +602,68 @@ mod tests {
         assert!(result_rank(&failed) < result_rank(&mapped));
         assert!(result_rank(&mapped) < result_rank(&estimated));
         assert!(result_rank(&estimated) < result_rank(&verified));
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn complete_estimated_classification_does_not_wait_for_silent_candidates() {
+        for kind in ["restricted-cone", "port-restricted-cone"] {
+            let first: SocketAddr = "203.0.113.11:5000".parse().unwrap();
+            let started = Instant::now();
+            let mut probes = JoinSet::new();
+            probes.spawn(async move {
+                (
+                    "partial",
+                    Ok(Candidate {
+                        result: classify(first, Some("full-cone"), None, None),
+                        complete: false,
+                    }),
+                )
+            });
+            probes.spawn(async move {
+                tokio::time::sleep(Duration::from_millis(50)).await;
+                (
+                    "complete",
+                    Ok(Candidate {
+                        result: classify(first, Some(kind), Some(first), Some(first)),
+                        complete: true,
+                    }),
+                )
+            });
+            let (closed, association) = tokio::sync::oneshot::channel::<()>();
+            probes.spawn(async move {
+                let _control = closed;
+                let result = std::future::pending::<Result<Candidate>>().await;
+                ("silent", result)
+            });
+            let result = collect_results(probes, started + Duration::from_secs(30)).await;
+            assert_eq!(result.kind, kind);
+            assert!(result.estimated);
+            assert_eq!(Instant::now() - started, Duration::from_millis(50));
+            // A completed report must not leave another candidate's association alive.
+            assert!(association.await.is_err());
+        }
+    }
+
+    #[tokio::test(start_paused = true)]
+    async fn incomplete_evidence_is_retained_until_the_shared_deadline() {
+        let first: SocketAddr = "203.0.113.11:5000".parse().unwrap();
+        let started = Instant::now();
+        let mut probes = JoinSet::new();
+        probes.spawn(async move {
+            (
+                "partial",
+                Ok(Candidate {
+                    result: classify(first, Some("full-cone"), None, None),
+                    complete: false,
+                }),
+            )
+        });
+        probes.spawn(async { ("silent", std::future::pending::<Result<Candidate>>().await) });
+        let result = collect_results(probes, started + Duration::from_secs(3)).await;
+        assert_eq!(result.kind, "full-cone");
+        assert!(result.estimated);
+        assert_eq!(result.mapped_address.as_deref(), Some("203.0.113.11:5000"));
+        assert_eq!(Instant::now() - started, Duration::from_secs(3));
     }
 
     #[test]

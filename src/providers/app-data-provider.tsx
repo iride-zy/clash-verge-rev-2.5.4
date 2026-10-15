@@ -99,12 +99,13 @@ export const AppDataProvider = ({
   const runState = useRunState()
   const isRunningModePending = runState == null
   const runningMode = runState?.mode
+  const diagnosticsGeneration = proxyView?.diagnosticsGeneration
+  const isProxyViewReady = proxyView != null
 
   useEffect(() => {
-    delayManager.setDiagnosticsGeneration(
-      proxyView?.diagnosticsGeneration ?? null,
-    )
-  }, [proxyView?.diagnosticsGeneration])
+    if (!isProxyViewReady) return
+    delayManager.setDiagnosticsGeneration(diagnosticsGeneration ?? null)
+  }, [diagnosticsGeneration, isProxyViewReady])
 
   const refreshProxy = useStableFn(_refetchProxyView)
   const refreshClashConfig = useStableFn(_refetchClashConfig)

@@ -4,6 +4,7 @@ import {
   type ProxyDelay,
 } from 'tauri-plugin-mihomo-api'
 
+import { NodeDiagnosticsCache } from '@/store/node-diagnostics-cache'
 import {
   memberDetails,
   providerNameOf,
@@ -24,7 +25,12 @@ export type DelaySnapshot = {
 
 const hashKey = (member: ResolvedProxyMember, group: string) => {
   if (member.kind !== 'node')
-    return JSON.stringify([group, member.kind, member.ref.name])
+    return JSON.stringify([
+      group,
+      member.kind,
+      member.ref.name,
+      member.kind === 'group' ? member.group.now : null,
+    ])
   const source = member.node.source
   return JSON.stringify([
     group,
@@ -46,22 +52,33 @@ const CACHE_TTL = 30 * 60 * 1000
 class DelayManager {
   private diagnosticsGeneration: string | null = null
   private measurements = new Map<string, Promise<DelayUpdate>>()
+  private diagnosticsCache = new NodeDiagnosticsCache()
 
   setDiagnosticsGeneration(generation: string | null) {
+    this.diagnosticsCache.setGeneration(generation)
     if (generation === this.diagnosticsGeneration) return
     this.diagnosticsGeneration = generation
     this.measurements.clear()
     for (const [key, value] of this.cache) {
-      const update = { ...value, diagnostics: undefined }
+      const update = {
+        ...value,
+        ...(value.delay === -2 ? { delay: -1, updatedAt: 0 } : {}),
+        diagnostics: undefined,
+      }
       this.cache.set(key, update)
       this.pendingItemUpdates.set(key, [update])
     }
     this.scheduleItemFlush()
+    // Restored status results also need to reach views whose latency cache is empty.
+    for (const group of this.groupListenerMap.keys()) {
+      this.queueGroupNotification(group, true)
+    }
   }
   private cache = new Map<string, DelayUpdate & { url: string }>()
   private urlMap = new Map<string, string>()
+  private urlRevisions = new Map<string, number>()
 
-  private listenerMap = new Map<string, (update: DelayUpdate) => void>()
+  private listenerMap = new Map<string, Set<(update: DelayUpdate) => void>>()
 
   private groupListenerMap = new Map<string, Set<() => void>>()
   // Consumers compare snapshot identity; replace it only when the group settles.
@@ -103,17 +120,19 @@ class DelayManager {
       this.pendingItemUpdates = new Map()
 
       updates.forEach((queue, key) => {
-        const listener = this.listenerMap.get(key)
-        if (!listener) return
+        const listeners = this.listenerMap.get(key)
+        if (!listeners) return
 
         queue.forEach((update) => {
-          try {
-            listener(update)
-          } catch (error) {
-            console.error(
-              `[DelayManager] 通知节点延迟监听器失败: ${key}`,
-              error,
-            )
+          for (const listener of [...listeners]) {
+            try {
+              listener(update)
+            } catch (error) {
+              console.error(
+                `[DelayManager] 通知节点延迟监听器失败: ${key}`,
+                error,
+              )
+            }
           }
         })
       })
@@ -147,8 +166,8 @@ class DelayManager {
     })
   }
 
-  private queueGroupNotification(group: string) {
-    if ((this.activeBatches.get(group) ?? 0) > 0) return
+  private queueGroupNotification(group: string, contextChanged = false) {
+    if (!contextChanged && (this.activeBatches.get(group) ?? 0) > 0) return
     // Invalidate the set wrapper while retaining unaffected per-group identities.
     this.groupSnapshots.delete(group)
     this.groupSetSnapshots.clear()
@@ -161,7 +180,7 @@ class DelayManager {
     const cached = this.groupSetSnapshots.get(groupKey)
     if (cached) return cached
 
-    const names = groupKey ? groupKey.split(' ') : []
+    const names = JSON.parse(groupKey) as string[]
     const snapshots = new Map(
       names.map((name) => [name, this.groupDelays(name)]),
     )
@@ -188,7 +207,16 @@ class DelayManager {
     } else {
       this.urlMap.delete(group)
     }
-    if (previous !== this.getUrl(group)) this.queueGroupNotification(group)
+    if (previous !== this.getUrl(group)) {
+      this.urlRevisions.set(group, (this.urlRevisions.get(group) ?? 0) + 1)
+      for (const key of this.cache.keys()) {
+        if ((JSON.parse(key) as unknown[])[0] !== group) continue
+        this.diagnosticsCache.cancelTesting(key, previous)
+        this.cache.delete(key)
+        this.pendingItemUpdates.delete(key)
+      }
+      this.queueGroupNotification(group, true)
+    }
   }
 
   getUrl(group: string) {
@@ -205,12 +233,27 @@ class DelayManager {
     listener: (update: DelayUpdate) => void,
   ) {
     const key = hashKey(member, group)
-    this.listenerMap.set(key, listener)
+    const listeners = this.listenerMap.get(key) ?? new Set()
+    listeners.add(listener)
+    this.listenerMap.set(key, listeners)
+    return () => this.removeItemListener(key, listener)
   }
 
-  removeListener(member: ResolvedProxyMember, group: string) {
-    const key = hashKey(member, group)
-    this.listenerMap.delete(key)
+  removeListener(
+    member: ResolvedProxyMember,
+    group: string,
+    listener?: (update: DelayUpdate) => void,
+  ) {
+    this.removeItemListener(hashKey(member, group), listener)
+  }
+
+  private removeItemListener(
+    key: string,
+    listener?: (update: DelayUpdate) => void,
+  ) {
+    const listeners = this.listenerMap.get(key)
+    if (listener) listeners?.delete(listener)
+    if (!listener || listeners?.size === 0) this.listenerMap.delete(key)
   }
 
   /** Multiple views may subscribe independently; notifications occur only after settle. */
@@ -238,17 +281,17 @@ class DelayManager {
       `[DelayManager] 设置延迟，代理: ${member.ref.name}, 组: ${group}, 延迟: ${delay}`,
     )
     const url = meta?.url ?? this.getUrl(group)
-    const cached = this.cache.get(key)
     const update: DelayUpdate = {
       delay,
       elapsed: meta?.elapsed,
       updatedAt: Date.now(),
-      diagnostics:
-        meta?.diagnostics ??
-        (cached?.url === url ? cached.diagnostics : undefined),
+      diagnostics: meta?.diagnostics ?? this.diagnosticsCache.get(key, url),
     }
 
     if (url !== this.getUrl(group)) return update
+    if (meta?.diagnostics) {
+      this.diagnosticsCache.set(key, url, meta.diagnostics)
+    }
     this.cache.set(key, { ...update, url })
 
     const queue = this.pendingItemUpdates.get(key)
@@ -270,23 +313,28 @@ class DelayManager {
     const key = hashKey(member, group)
     const cached = this.cache.get(key)
     const entry = cached?.url === this.getUrl(group) ? cached : undefined
+    const diagnostics = this.diagnosticsCache.get(key, this.getUrl(group))
     const latest = history?.at(-1)
     const updatedAt = latest ? Date.parse(latest.time) : 0
     if (latest && entry?.delay !== -2 && updatedAt > (entry?.updatedAt ?? 0)) {
       return {
         delay: latest.delay || 1e6,
         updatedAt,
-        diagnostics: entry?.diagnostics,
+        diagnostics,
       }
     }
-    if (!entry) return undefined
-
-    if (Date.now() - entry.updatedAt > CACHE_TTL) {
-      this.cache.delete(key)
-      return undefined
+    if (entry && Date.now() - entry.updatedAt <= CACHE_TTL) {
+      return { ...entry, diagnostics }
     }
 
-    return { ...entry }
+    if (entry) this.cache.delete(key)
+    if (!diagnostics) return undefined
+    const fallback = memberDetails(member)?.history.at(-1)
+    return {
+      delay: fallback ? fallback.delay || 1e6 : -1,
+      updatedAt: fallback ? Date.parse(fallback.time) || 0 : 0,
+      diagnostics,
+    }
   }
 
   getDelay(member: ResolvedProxyMember, group: string) {
@@ -345,6 +393,7 @@ class DelayManager {
       this.diagnosticsGeneration,
       group,
       this.getUrl(group),
+      this.urlRevisions.get(group),
       member.ref.name,
       member.kind === 'node' ? member.node.source : 'group',
     ])
@@ -382,9 +431,13 @@ class DelayManager {
     generation: string | null,
   ) {
     const url = this.getUrl(group)
+    const revision = this.urlRevisions.get(group)
+    const key = hashKey(member, group)
+    const testing: DiagnosticsState = { status: 'testing' }
     const publish = (diagnostics: DiagnosticsState) => {
       if (
         generation !== this.diagnosticsGeneration ||
+        revision !== this.urlRevisions.get(group) ||
         url !== this.getUrl(group)
       )
         return
@@ -395,7 +448,7 @@ class DelayManager {
         diagnostics,
       })
     }
-    publish({ status: 'testing' })
+    publish(testing)
     try {
       const result = await checkNodeDiagnostics(
         member.node.source.proxyName,
@@ -410,6 +463,8 @@ class DelayManager {
           ? String(error.detail)
           : String(error)
       publish({ status: 'error', detail })
+    } finally {
+      this.diagnosticsCache.cancelTesting(key, url, testing)
     }
   }
 
@@ -430,15 +485,23 @@ class DelayManager {
     )
 
     const url = this.getUrl(group)
+    const revision = this.urlRevisions.get(group)
+    const generation = this.diagnosticsGeneration
+    const publish = (delay: number, elapsed: number) =>
+      revision === this.urlRevisions.get(group) &&
+      generation === this.diagnosticsGeneration
+        ? this.setDelay(member, group, delay, { elapsed, url })
+        : { delay, elapsed, updatedAt: Date.now() }
     this.setDelay(member, group, -2, { url })
 
     const startTime = Date.now()
+    let timer: ReturnType<typeof setTimeout> | undefined
 
     try {
       debugLog(`[DelayManager] 调用API测试延迟，代理: ${name}, URL: ${url}`)
 
       const timeoutPromise = new Promise<ProxyDelay>((resolve) => {
-        setTimeout(() => resolve({ delay: 0 }), timeout)
+        timer = setTimeout(() => resolve({ delay: 0 }), timeout)
       })
 
       const result = await Promise.race([
@@ -455,14 +518,16 @@ class DelayManager {
       const elapsed = elapsedTime
       debugLog(`[DelayManager] 延迟测试完成，代理: ${name}, 结果: ${delay}ms`)
 
-      return this.setDelay(member, group, delay, { elapsed, url })
+      return publish(delay, elapsed)
     } catch (error) {
       await new Promise((resolve) => setTimeout(resolve, 500))
       console.error(`[DelayManager] 延迟测试出错，代理: ${name}`, error)
       const delay = 1e6 // error
       const elapsed = Date.now() - startTime
 
-      return this.setDelay(member, group, delay, { elapsed, url })
+      return publish(delay, elapsed)
+    } finally {
+      clearTimeout(timer)
     }
   }
 
@@ -477,21 +542,24 @@ class DelayManager {
       `[DelayManager] 批量测试延迟开始，组: ${group}, 数量: ${proxies.length}, 并发数: ${concurrency}`,
     )
     this.activeBatches.set(group, (this.activeBatches.get(group) ?? 0) + 1)
-    proxies.forEach((member) => {
-      this.setDelay(member, group, -2)
-    })
+    const generation = this.diagnosticsGeneration
+    const url = this.getUrl(group)
+    const revision = this.urlRevisions.get(group)
+    const isCurrent = () =>
+      generation === this.diagnosticsGeneration &&
+      url === this.getUrl(group) &&
+      revision === this.urlRevisions.get(group)
 
     let index = 0
     const startTime = Date.now()
 
     const help = async (): Promise<void> => {
+      if (!isCurrent()) return
       const currMember = proxies[index++]
       if (!currMember) return
       const currName = currMember.ref.name
 
       try {
-        this.setDelay(currMember, group, -2)
-
         // Stagger requests so a batch does not hit the core at once.
         if (index > 1) {
           await new Promise((resolve) =>
@@ -499,6 +567,9 @@ class DelayManager {
           )
         }
 
+        if (!isCurrent()) return
+        // Only active work enters the testing state; canceled queued members keep
+        // their previous result rather than remaining in a loading state.
         // Do not reorder a list around the pointer while batch results are arriving.
         await this.measureDelay(currMember, group, timeout, testType)
       } catch (error) {
